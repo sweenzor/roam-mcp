@@ -2,7 +2,7 @@ import httpx
 from typing import Dict, List, Optional, Any, Union
 import json
 from datetime import datetime
-import config
+from . import config
 
 class RoamAPI:
     def __init__(self):

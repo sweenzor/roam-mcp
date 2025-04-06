@@ -1,0 +1,12 @@
+# cURL Test Commands
+
+# List tools
+curl http://localhost:8000/tools
+
+# Get tool schema
+curl http://localhost:8000/tools/hello_world/schema
+
+# Call the hello_world tool
+curl -X POST http://localhost:8000/tools/hello_world/run \
+  -H "Content-Type: application/json" \
+  -d '{"name": "cURL Tester"}'

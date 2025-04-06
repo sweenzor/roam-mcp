@@ -4,8 +4,8 @@ from mcp.server.fastmcp import FastMCP, Context
 from typing import Dict, Any, List, Optional
 import json
 
-from roam_api import RoamAPI
-from markdown_utils import parse_markdown, convert_to_roam_actions, convert_to_roam_markdown
+from .roam_api import RoamAPI
+from .markdown_utils import parse_markdown, convert_to_roam_actions, convert_to_roam_markdown
 
 # Initialize the MCP server
 mcp = FastMCP("roam-research")
@@ -197,4 +197,5 @@ async def search_by_text(
 
 # Run the server
 if __name__ == "__main__":
+    print("Starting Roam MCP server...")
     mcp.run()
