@@ -1,1 +1,1 @@
-# mcp-server-roam
+# MCP Server for Roam Research
