@@ -1,6 +1,6 @@
 # MCP Server for Roam Research
 
-An MCP (Model Context Protocol) server that provides access to Roam Research's functionality through a standardized interface for AI assistants.
+A Model Context Protocol (MCP) server that provides programmatic access to Roam Research functionality via LLMs.
 
 ## Installation
 
@@ -14,7 +14,22 @@ uv pip install -e ".[dev]"
 
 ## Usage
 
-### Running in Development Mode
+### Command Line
+
+Run the MCP server directly:
+
+```bash
+# With standard logging
+uv run mcp-server-roam
+
+# With verbose logging
+uv run mcp-server-roam -v
+
+# With debug logging
+uv run mcp-server-roam -vv
+```
+
+### Development
 
 You can run the server in development mode with the MCP Inspector:
 
@@ -22,7 +37,7 @@ You can run the server in development mode with the MCP Inspector:
 uv run mcp dev src/mcp_server_roam/server.py
 ```
 
-### Installing in Claude Desktop
+### Installation in Claude Desktop
 
 To use the server with Claude Desktop:
 
@@ -30,9 +45,28 @@ To use the server with Claude Desktop:
 uv run mcp install src/mcp_server_roam/server.py
 ```
 
+## Available Tools
+
+- `roam_hello_world`: Basic greeting tool for testing
+- `roam_fetch_page_by_title`: Retrieve a page's content by title
+- `roam_create_block`: Create a new block in a Roam page
+
 ## Development
 
-- Format code: `uv run black src tests`
-- Type check: `uv run mypy src`
-- Lint: `uv run ruff check src tests`
-- Run tests: `uv run pytest`
+```bash
+# Run tests
+uv run pytest
+
+# Format code
+uv run black src tests
+
+# Type check
+uv run pyright
+
+# Lint
+uv run ruff check src tests
+```
+
+## License
+
+MIT

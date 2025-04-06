@@ -1,50 +1,120 @@
-"""
-Roam Research MCP Server - Simple Hello World Example
-"""
-from mcp.server.fastmcp import FastMCP
+import logging
+from typing import Any, Optional
+from mcp.server import Server
+from mcp.server.stdio import stdio_server
+from mcp.types import Tool, TextContent
+from pydantic import BaseModel
+from enum import Enum
 
-# Create an MCP server
-mcp = FastMCP("Roam Research MCP")
+# Pydantic models for tool inputs
+class RoamHelloWorld(BaseModel):
+    name: str = "World"
 
+class RoamFetchPageByTitle(BaseModel):
+    title: str
 
-# Add a simple greeting tool
-@mcp.tool()
+class RoamCreateBlock(BaseModel):
+    content: str
+    page_uid: Optional[str] = None
+    title: Optional[str] = None
+
+# Enum for tool names
+class RoamTools(str, Enum):
+    HELLO_WORLD = "roam_hello_world"
+    FETCH_PAGE_BY_TITLE = "roam_fetch_page_by_title"
+    CREATE_BLOCK = "roam_create_block"
+
+# Tool implementation functions
 def roam_hello_world(name: str = "World") -> str:
-    """
-    A simple hello world tool for Roam Research MCP.
-    
-    Args:
-        name: The name to greet. Defaults to "World".
-        
-    Returns:
-        A greeting message.
-    """
+    """Simple hello world tool for Roam Research MCP."""
     return f"Hello, {name}! This is the Roam Research MCP server."
 
-
-# Add a simple resource that returns information about Roam Research
-@mcp.resource("roam://info")
-def get_roam_info() -> str:
+def roam_fetch_page_by_title(title: str) -> str:
     """
-    Get basic information about Roam Research.
+    Fetch a page's content by title.
     
-    Returns:
-        Basic information about Roam Research as markdown text.
+    In a real implementation, this would use the Roam API to fetch the page content.
+    For this simple example, we just return a placeholder message.
     """
-    return """
-# Roam Research
+    # Mock implementation
+    return f"Contents of page '{title}':\n\n- This is a mock implementation\n  - We would fetch the actual page content from Roam\n  - And convert it to markdown format\n- With proper formatting"
 
-Roam Research is a note-taking and knowledge management application that focuses on networked thought.
-
-Key features:
-- **Bi-directional linking**: Connect notes and concepts effortlessly
-- **Block-based structure**: Each bullet point is a block with a unique ID
-- **Daily notes**: Automatically creates a new page for each day
-- **Graph view**: Visualize connections between your notes
-- **Queries**: Find and display information across your knowledge graph
+def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optional[str] = None) -> dict[str, Any]:
     """
+    Create a new block in a Roam page.
+    
+    In a real implementation, this would use the Roam API to create a new block.
+    For this simple example, we just return a placeholder message.
+    """
+    # Mock implementation
+    target = title if title else page_uid if page_uid else "Today's Daily Note"
+    return {
+        "success": True,
+        "block_uid": "mock-block-uid",
+        "parent_uid": "mock-parent-uid",
+        "message": f"Created block in '{target}' with content: {content}"
+    }
 
-
-if __name__ == "__main__":
-    # Run the MCP server
-    mcp.run()
+async def serve() -> None:
+    """Main server function that initializes and runs the MCP server."""
+    logger = logging.getLogger(__name__)
+    
+    # Create the MCP server
+    server = Server("mcp-roam")
+    
+    @server.list_tools()
+    async def list_tools() -> list[Tool]:
+        return [
+            Tool(
+                name=RoamTools.HELLO_WORLD,
+                description="Simple hello world greeting from Roam MCP server",
+                inputSchema=RoamHelloWorld.schema(),
+            ),
+            Tool(
+                name=RoamTools.FETCH_PAGE_BY_TITLE,
+                description="Fetch and read a page's content by title",
+                inputSchema=RoamFetchPageByTitle.schema(),
+            ),
+            Tool(
+                name=RoamTools.CREATE_BLOCK,
+                description="Add a new block to a Roam page",
+                inputSchema=RoamCreateBlock.schema(),
+            ),
+        ]
+    
+    @server.call_tool()
+    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+        """Handle tool calls."""
+        match name:
+            case RoamTools.HELLO_WORLD:
+                result = roam_hello_world(arguments.get("name", "World"))
+                return [TextContent(
+                    type="text",
+                    text=result
+                )]
+                
+            case RoamTools.FETCH_PAGE_BY_TITLE:
+                page_content = roam_fetch_page_by_title(arguments["title"])
+                return [TextContent(
+                    type="text",
+                    text=page_content
+                )]
+                
+            case RoamTools.CREATE_BLOCK:
+                result = roam_create_block(
+                    arguments["content"],
+                    arguments.get("page_uid"),
+                    arguments.get("title")
+                )
+                return [TextContent(
+                    type="text",
+                    text=str(result)
+                )]
+                
+            case _:
+                raise ValueError(f"Unknown tool: {name}")
+    
+    # Initialize and run the server
+    options = server.create_initialization_options()
+    async with stdio_server() as (read_stream, write_stream):
+        await server.run(read_stream, write_stream, options, raise_exceptions=True)
