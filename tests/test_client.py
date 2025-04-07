@@ -6,10 +6,14 @@ This script sends a request to test the roam_hello_world tool.
 import asyncio
 import json
 import sys
+import os
 import subprocess
 import time
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
+
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 async def test_server():
     # Configure the client

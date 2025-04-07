@@ -13,7 +13,8 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - Install dependencies: `uv pip install -e ".[dev]"`
 - Run server: `uv run python -m mcp_server_roam`
 - Run tests: `uv run pytest`
-- Run single test: `uv run pytest tests/path/to/test_file.py::test_function_name -v`
+- Run single test: `uv run pytest tests/test_file.py::test_function_name -v`
+- Run specific test file: `uv run python -m tests.test_roam_api`
 - Format code: `uv run black src tests`
 - Type check: `uv run mypy src`
 - Lint: `uv run ruff check src tests`
@@ -37,8 +38,11 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
   - `server.py` - MCP server implementation using mcp.server.Server
   - `roam_api.py` - Interface to Roam Research API
 - `/tests/` - Test directory
+  - `__init__.py` - Test package initialization
   - `test_server.py` - Unit tests for server functionality
-- `test_client.py` - Script for programmatically testing the MCP server
+  - `test_client.py` - Script for programmatically testing the MCP server
+  - `test_roam_api.py` - Tests for the Roam API client
+  - `test_mcp_tools.py` - Tests for the MCP server tools
 - `pyproject.toml` - Project metadata, dependencies, and build settings
 - `.env` - Environment variables for Roam API token and graph name
 

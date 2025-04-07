@@ -7,8 +7,13 @@ This script tests the RoamAPI class that's modeled after the Python SDK.
 import asyncio
 import json
 import os
+import sys
 import logging
 from dotenv import load_dotenv
+
+# Add the project root to the Python path
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+
 from src.mcp_server_roam.roam_api import RoamAPI
 
 # Set up logging
