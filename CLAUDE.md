@@ -85,9 +85,14 @@ Currently implemented tools:
 2. `roam_fetch_page_by_title`: Fetch page content with hierarchical structure
    - Input: page title
    - Output: Markdown representation with nested blocks
-   - Includes up to 3 levels of nesting (page > blocks > nested blocks > deeper nested blocks)
+   - Simplified version with basic formatting
 
-3. `roam_create_block`: Add blocks to pages or under parent blocks
+3. `roam_get_page_markdown`: Retrieve page content in clean markdown format
+   - Input: page title
+   - Output: Markdown representation with properly indented blocks
+   - Recursively handles blocks at any nesting depth
+
+4. `roam_create_block`: Add blocks to pages or under parent blocks
    - Input: content text, optional page uid or title
    - Output: Created block UID and confirmation
 
@@ -151,6 +156,29 @@ Roam uses Datalog for querying its graph database. Key aspects:
 - For Claude Desktop: `uv run mcp install`
 - Support environment variables via command line: `uv run mcp install -v ROAM_API_TOKEN=xxx -v ROAM_GRAPH_NAME=xxx`
 - Support .env file for environment variables: `uv run mcp install -f .env`
+
+## Claude Desktop Configuration
+To use this MCP server with Claude Desktop, add the following configuration to Claude Desktop's config file (located at `~/Library/Application Support/Claude/claude_desktop_config.json`):
+
+```json
+"roam": {
+  "command": "uv",
+  "args": [
+    "--directory",
+    "/path/to/roam-mcp",
+    "run",
+    "python",
+    "-m",
+    "mcp_server_roam"
+  ],
+  "env": {
+    "ROAM_API_TOKEN": "your-roam-api-token",
+    "ROAM_GRAPH_NAME": "your-graph-name"
+  }
+}
+```
+
+Replace `/path/to/roam-mcp` with the absolute path to your repository, and update the environment variables with your actual Roam API credentials.
 
 ## References
 - Example Python Git MCP Server: `reference/example-python-git-mcp-server/`
