@@ -9,7 +9,7 @@ from enum import Enum
 from dotenv import load_dotenv
 
 # Import our Roam API client
-from src.mcp_server_roam.roam_api import RoamAPI
+from mcp_server_roam.roam_api import RoamAPI
 
 # Load environment variables from .env file
 load_dotenv()
