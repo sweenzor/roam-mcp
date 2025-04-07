@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+- Use `uv` for package management
+
 ## Project Overview
 This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs to interact with Roam's knowledge graph data structure. Based on a JavaScript example implementation (`reference/roam-research-mcp-js`), we're creating a Python version using the MCP Python SDK to enable AI assistants to access and manipulate Roam Research data.
 
@@ -9,14 +11,15 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - Package management: Use `uv` for all Python package operations
 - Setup environment: `uv venv`
 - Install dependencies: `uv pip install -e ".[dev]"`
-- Run server: `uv run python src/mcp_server_roam/server.py`
+- Run server: `uv run python -m mcp_server_roam`
 - Run tests: `uv run pytest`
 - Run single test: `uv run pytest tests/path/to/test_file.py::test_function_name -v`
 - Format code: `uv run black src tests`
 - Type check: `uv run mypy src`
 - Lint: `uv run ruff check src tests`
-- MCP development mode: `uv run mcp dev src/mcp_server_roam/server.py`
-- MCP install to Claude Desktop: `uv run mcp install src/mcp_server_roam/server.py`
+- MCP development mode: `uv run mcp dev`
+- MCP install to Claude Desktop: `uv run mcp install`
+- Test client: `python test_client.py`
 
 ## Code Style Guidelines
 - PEP 8 compliant with Black formatting (88-character line length)
@@ -29,81 +32,79 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 
 ## Project Structure
 - `/src/mcp_server_roam/` - Main module directory
-  - `server.py` - MCP server implementation with FastMCP
+  - `__init__.py` - Package initialization and CLI entry point with Click
+  - `__main__.py` - Entry point for direct module execution
+  - `server.py` - MCP server implementation using mcp.server.Server
   - `roam_api.py` - Interface to Roam Research API
-  - `markdown_utils.py` - Markdown processing utilities
-  - `/tools/` - Tool implementations for Roam operations
-  - `/search/` - Search implementations for querying Roam data
-  - `/config/` - Environment and configuration handling
-
-## Roam Research Data Model
-- **Blocks**: Basic unit of Roam data with unique 9-character IDs (nanoid.js format)
-  - Properties: string (content), uid, children, create-time, edit-time, heading, text-align
-  - Parent-child relationships form a hierarchical tree structure
-- **Pages**: Collections of blocks with unique title strings
-  - Properties: title, children, create-time, edit-time
-  - Automatically created when referenced with `[[...]]` syntax
-- **Linking**: Bi-directional links between pages and blocks
-  - Page references: `[[Page Title]]`
-  - Block references: `((Block_ID))`
-  - Block embeds: `{{embed: ((Block_ID))}}`
+- `/tests/` - Test directory
+  - `test_server.py` - Unit tests for server functionality
+- `test_client.py` - Script for programmatically testing the MCP server
+- `pyproject.toml` - Project metadata, dependencies, and build settings
+- `.env` - Environment variables for Roam API token and graph name
 
 ## MCP Server Implementation
-- Use FastMCP for server implementation: `from mcp.server.fastmcp import FastMCP`
-- Initialize Roam API client in server lifespan function
-- Configure environment variables for Roam API token and graph name
-- Support both stdio and SSE transports
-- Resources expose Roam data to LLMs (read-only endpoints)
-- Tools provide functionality for LLMs to interact with Roam data
+- Uses MCP Server API (`from mcp.server import Server`)
+- Handles both stdin/stdout and SSE transports
+- Initializes Roam API client with environment variables
+- Uses Pydantic models for tool input validation
+- Command-line interface with Click
+- Uses dotenv for loading environment variables
+- Server implementation follows the pattern from `reference/example-python-git-mcp-server`
+
+## Roam API Client
+- Based on the implementation in `reference/roam-python-sdk/roam_client/client.py`
+- Handles API authentication with both 'Authorization' and 'x-authorization' headers
+- Manages redirects from the main Roam API endpoint to peer nodes
+- Supports Datalog queries, entity pulls, and write operations
+- Uses a pull pattern to retrieve nested page/block content
+- Handles error responses from the Roam API
+
+## Roam Research Data Model
+- **Blocks**: Basic unit of Roam data with unique 9-character UIDs
+  - Properties: `:block/string`, `:block/uid`, `:block/children`, `:create/time`, `:edit/time`
+  - Parent-child relationships form a hierarchical tree structure
+- **Pages**: Collections of blocks with unique title strings
+  - Properties: `:node/title`, `:block/children`, `:create/time`, `:edit/time`
+  - Automatically created when referenced with `[[...]]` syntax
+- **Entity-Attribute-Value (EAV) Storage**:
+  - Everything in Roam is an entity with a numeric ID (`:db/id`)
+  - Attributes have namespaces (e.g., `:block/string`, `:node/title`)
+  - Queried using Datalog patterns
 
 ## Key Tool Implementations
-Based on the JavaScript example, implement these tools:
-1. `roam_fetch_page_by_title`: Fetch page content with resolved references
+Currently implemented tools:
+
+1. `roam_hello_world`: Simple greeting tool for testing
+   - Input: name (optional)
+   - Output: Hello message
+
+2. `roam_fetch_page_by_title`: Fetch page content with hierarchical structure
    - Input: page title
-   - Output: Markdown representation with hierarchical structure
-   - Resolve block references recursively (up to 4 levels deep)
-2. `roam_create_page`: Create new pages with optional content
-   - Input: title, optional array of block content with nesting levels
-   - Output: Created page UID
-3. `roam_create_block`: Add blocks to pages (default to today's daily page)
+   - Output: Markdown representation with nested blocks
+   - Includes up to 3 levels of nesting (page > blocks > nested blocks > deeper nested blocks)
+
+3. `roam_create_block`: Add blocks to pages or under parent blocks
    - Input: content text, optional page uid or title
-   - Output: Created block UID and parent UID
-4. `roam_import_markdown`: Import nested markdown content
-   - Input: markdown content, parent block identifiers
-   - Process hierarchical structure and convert to Roam blocks
-5. `roam_add_todo`: Add todo items to daily pages
-   - Input: array of todo items
-   - Output: Created block UIDs
-6. `roam_create_outline`: Create hierarchical outlines
-   - Input: array of outline items with text and level
-   - Output: Created block UIDs
-7. `roam_search_block_refs`: Search for block references
-   - Input: optional block UID, optional page title/UID
-   - Output: Matching blocks with context
-8. `roam_search_by_text`: Search blocks by text content
-   - Input: search text, optional page scope
-   - Output: Matching blocks with context
-9. `roam_search_for_tag`: Search for blocks with specific tags
-   - Input: primary tag, optional secondary tag, optional page scope
-   - Output: Matching blocks with context
-10. `roam_update_block`: Update block content
-    - Input: block UID, new content or transform pattern
-    - Output: Updated content
-11. `roam_search_hierarchy`: Navigate parent-child relationships
-    - Input: parent or child UID, max depth
-    - Output: Related blocks with depth information
-12. `roam_datomic_query`: Execute Datalog queries on the Roam graph
-    - Input: Datalog query string, optional parameters
-    - Output: Query results
+   - Output: Created block UID and confirmation
+
+Future tools to consider:
+- `roam_create_page`: Create new pages with optional content
+- `roam_import_markdown`: Import nested markdown content
+- `roam_add_todo`: Add todo items to daily pages
+- `roam_search_by_text`: Search blocks by text content
+- `roam_search_for_tag`: Search for blocks with specific tags
+- `roam_update_block`: Update block content
+- `roam_datomic_query`: Execute Datalog queries on the Roam graph
 
 ## Datalog Queries
 Roam uses Datalog for querying its graph database. Key aspects:
 - Basic query format: `[:find ?variables :where [conditions]]`
 - Common block attributes:
   - `:block/uid`: Unique block identifier
-  - `:create/time`, `:edit/time`: Creation and edit timestamps
   - `:block/string`: Block content
+  - `:block/children`: Child blocks
   - `:block/parents`: List of ancestor blocks
+  - `:create/time`, `:edit/time`: Creation and edit timestamps
 - Common page attributes:
   - `:node/title`: Page title
 - Query patterns:
@@ -111,67 +112,44 @@ Roam uses Datalog for querying its graph database. Key aspects:
   - Get pages by title: `[?p :node/title ?title]`
   - Search for text: `[(clojure.string/includes? ?string "search term")]`
   - Get block children: `[?p :block/children ?c]`
-- Use Pull patterns for recursive data retrieval
-
-## Markdown Utils
-Implement conversion between standard markdown and Roam-flavored markdown:
-- Parse hierarchical markdown structure (headings, bullet points, indentation)
-- Convert block references (`((UID))`) and embeds (`{{embed: ((UID))}}`)
-- Handle Roam-specific syntax:
-  - Todo items: `- [ ]` → `{{[[TODO]]}}`
-  - Completed items: `- [x]` → `{{[[DONE]]}}`
-  - Tables: Convert markdown tables to Roam's `{{table}}` format
-  - Highlights: `==text==` → `^^text^^`
-  - Italics: `*text*` → `__text__`
-- Preserve block relationships when importing
-
-## Search Implementation
-Create class-based search handlers for different query types:
-- `TextSearchHandler`: Find blocks containing specific text
-- `TagSearchHandler`: Find blocks with specific tags
-- `BlockRefSearchHandler`: Find block references
-- `HierarchySearchHandler`: Navigate parent-child relationships
-- `StatusSearchHandler`: Find todo/done items
-- `DatomicQueryHandler`: Execute custom Datalog queries
-- Use abstraction layer over query engine for modularity
+- Pull patterns for data retrieval: `[:find (pull ?e [*]) :where ...]`
+- Recursive pull patterns: `[* {:block/children [* {:block/children [*]}]}]`
 
 ## Configuration and Authentication
 - Use environment variables for API token and graph name:
   - `ROAM_API_TOKEN`: Roam Research API token
   - `ROAM_GRAPH_NAME`: Name of the Roam graph to access
-- Support .env file for local development
+- Support .env file for local development (via python-dotenv)
 - Validate environment variables on startup
 - Handle authentication errors gracefully
+- API authentication requires both headers:
+  - `Authorization: Bearer <token>`
+  - `x-authorization: Bearer <token>`
 
 ## Error Handling
-- Create custom exception types for different error categories:
-  - `RoamAPIError`: Errors from the Roam API
-  - `PageNotFoundError`: Page title doesn't exist
-  - `BlockNotFoundError`: Block UID doesn't exist
-  - `InvalidQueryError`: Problems with Datalog queries
-  - `MarkdownParseError`: Issues parsing markdown
-- Provide detailed error messages with suggestions when possible
-- Map errors to appropriate MCP error codes
+- Handle API errors with appropriate HTTP status codes
+- Gracefully handle redirects to peer nodes
+- Provide clear error messages in tool outputs
+- Use try/except blocks to prevent tool failures from crashing the server
+- Add logging to help debug API interactions
+- Handle cases where pages or blocks are not found
 
-## Testing Strategy
-- Unit tests for individual components:
-  - `markdown_utils.py`: Test parsing and conversion functions
-  - Search handlers: Test query construction and result formatting
-  - Tool implementations: Test request handling and response formatting
-- Integration tests for Roam API interactions
-- Mock Roam API responses for testing
-- Test edge cases: empty graphs, malformed blocks, permission issues
-- Provide fixtures for commonly used test data
+## Testing
+- Unit tests for tool implementations
+- Integration tests via test_client.py
+- MCP Inspector for interactive testing
+- Manual verification with actual Roam graph data
+- Test page retrieval with different nesting levels
+- Test error handling with invalid inputs
 
 ## Deployment
-- For development: `mcp dev src/mcp_server_roam/server.py`
-- For Claude Desktop: `mcp install src/mcp_server_roam/server.py`
-- Support environment variables via command line: `mcp install -v ROAM_API_TOKEN=xxx -v ROAM_GRAPH_NAME=xxx`
-- Support .env file for environment variables: `mcp install -f .env`
+- For development: `uv run mcp dev`
+- For Claude Desktop: `uv run mcp install`
+- Support environment variables via command line: `uv run mcp install -v ROAM_API_TOKEN=xxx -v ROAM_GRAPH_NAME=xxx`
+- Support .env file for environment variables: `uv run mcp install -f .env`
 
-## Resources
-- [Roam Research API Documentation](https://roamresearch.com/#/app/developer-documentation/)
-- [MCP Python SDK Documentation](https://modelcontextprotocol.io)
-- [Roam Import JSON Schema](reference/roam-research-mcp-js/Roam%20Import%20JSON%20Schema.md)
-- [Roam Datalog Cheatsheet](reference/roam-research-mcp-js/Roam_Research_Datalog_Cheatsheet.md)
-- [JavaScript Reference Implementation](reference/roam-research-mcp-js/)
+## References
+- Example Python Git MCP Server: `reference/example-python-git-mcp-server/`
+- Roam Python SDK: `reference/roam-python-sdk/`
+- MCP Python SDK Documentation: https://modelcontextprotocol.io
+- Roam Research API Documentation: https://roamresearch.com/#/app/developer-documentation/
