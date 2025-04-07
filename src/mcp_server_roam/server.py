@@ -55,64 +55,65 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
         "message": f"Created block in '{target}' with content: {content}"
     }
 
+# Create the server instance - this is what mcp dev looks for
+server = Server("mcp-roam")
+
+# Set up the tools
+@server.list_tools()
+async def list_tools() -> list[Tool]:
+    return [
+        Tool(
+            name=RoamTools.HELLO_WORLD,
+            description="Simple hello world greeting from Roam MCP server",
+            inputSchema=RoamHelloWorld.schema(),
+        ),
+        Tool(
+            name=RoamTools.FETCH_PAGE_BY_TITLE,
+            description="Fetch and read a page's content by title",
+            inputSchema=RoamFetchPageByTitle.schema(),
+        ),
+        Tool(
+            name=RoamTools.CREATE_BLOCK,
+            description="Add a new block to a Roam page",
+            inputSchema=RoamCreateBlock.schema(),
+        ),
+    ]
+
+@server.call_tool()
+async def call_tool(name: str, arguments: dict) -> list[TextContent]:
+    """Handle tool calls."""
+    match name:
+        case RoamTools.HELLO_WORLD:
+            result = roam_hello_world(arguments.get("name", "World"))
+            return [TextContent(
+                type="text",
+                text=result
+            )]
+            
+        case RoamTools.FETCH_PAGE_BY_TITLE:
+            page_content = roam_fetch_page_by_title(arguments["title"])
+            return [TextContent(
+                type="text",
+                text=page_content
+            )]
+            
+        case RoamTools.CREATE_BLOCK:
+            result = roam_create_block(
+                arguments["content"],
+                arguments.get("page_uid"),
+                arguments.get("title")
+            )
+            return [TextContent(
+                type="text",
+                text=str(result)
+            )]
+            
+        case _:
+            raise ValueError(f"Unknown tool: {name}")
+
 async def serve() -> None:
     """Main server function that initializes and runs the MCP server."""
     logger = logging.getLogger(__name__)
-    
-    # Create the MCP server
-    server = Server("mcp-roam")
-    
-    @server.list_tools()
-    async def list_tools() -> list[Tool]:
-        return [
-            Tool(
-                name=RoamTools.HELLO_WORLD,
-                description="Simple hello world greeting from Roam MCP server",
-                inputSchema=RoamHelloWorld.schema(),
-            ),
-            Tool(
-                name=RoamTools.FETCH_PAGE_BY_TITLE,
-                description="Fetch and read a page's content by title",
-                inputSchema=RoamFetchPageByTitle.schema(),
-            ),
-            Tool(
-                name=RoamTools.CREATE_BLOCK,
-                description="Add a new block to a Roam page",
-                inputSchema=RoamCreateBlock.schema(),
-            ),
-        ]
-    
-    @server.call_tool()
-    async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-        """Handle tool calls."""
-        match name:
-            case RoamTools.HELLO_WORLD:
-                result = roam_hello_world(arguments.get("name", "World"))
-                return [TextContent(
-                    type="text",
-                    text=result
-                )]
-                
-            case RoamTools.FETCH_PAGE_BY_TITLE:
-                page_content = roam_fetch_page_by_title(arguments["title"])
-                return [TextContent(
-                    type="text",
-                    text=page_content
-                )]
-                
-            case RoamTools.CREATE_BLOCK:
-                result = roam_create_block(
-                    arguments["content"],
-                    arguments.get("page_uid"),
-                    arguments.get("title")
-                )
-                return [TextContent(
-                    type="text",
-                    text=str(result)
-                )]
-                
-            case _:
-                raise ValueError(f"Unknown tool: {name}")
     
     # Initialize and run the server
     options = server.create_initialization_options()
