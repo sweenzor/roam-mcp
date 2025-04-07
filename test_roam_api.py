@@ -1,15 +1,19 @@
 #!/usr/bin/env python3
 """
 Test script for the Roam API client.
-This script demonstrates basic usage of the RoamAPI class to fetch data from a Roam graph,
-focusing on Datalog queries which are more likely to work with a read-only token.
+This script tests the RoamAPI class that's modeled after the Python SDK.
 """
 
 import asyncio
 import json
 import os
+import logging
 from dotenv import load_dotenv
 from src.mcp_server_roam.roam_api import RoamAPI
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -25,78 +29,56 @@ async def main():
         print("\n1. Initializing Roam API client...")
         roam = RoamAPI()
         
-        # Try a Datalog query to list some pages
-        print("\n2. Running a query to list pages...")
-        query = '[:find ?title :where [?e :node/title ?title]]'
-        
+        print("\n2. Running a simple Datalog query to list pages...")
         try:
+            # Use a simpler query format
+            query = '[:find ?title :where [?e :node/title ?title]]'
             results = roam.run_query(query)
-            print("Query successful!")
-            print(f"Results type: {type(results)}")
-            print(f"Raw results: {results}")
             
-            print("\nPages in the graph:")
-            if results and isinstance(results, list) and len(results) > 0:
+            print("Pages in the graph:")
+            if results and len(results) > 0:
                 for idx, page in enumerate(results[:10], 1):  # Show at most 10 pages
-                    if isinstance(page, list) and len(page) > 0:
-                        print(f"{idx}. {page[0]}")
-                    else:
-                        print(f"{idx}. {page}")
-                        
-                # Continue with querying blocks if we have pages
-                if len(results) > 0 and isinstance(results[0], list) and len(results[0]) > 0:
+                    print(f"{idx}. {page[0]}")
+                
+                # Get details for one of the pages
+                if len(results) > 0:
                     first_page = results[0][0]
-                    print(f"\n3. Querying blocks for page '{first_page}'...")
+                    print(f"\n3. Getting details for page '{first_page}'...")
                     
                     try:
-                        block_query = '[:find (pull ?b [*]) :where [?p :node/title "' + first_page + '"] [?p :block/children ?b]]'
-                        block_results = roam.run_query(block_query)
+                        page_data = roam.get_page(first_page)
+                        print(f"Page details for '{first_page}':")
+                        print_formatted_json(page_data)
                         
-                        if block_results and isinstance(block_results, list) and len(block_results) > 0:
-                            print(f"Found {len(block_results)} blocks on page '{first_page}'")
-                            if len(block_results) > 0:
-                                print("\nFirst block:")
-                                print_formatted_json(block_results[0][0] if isinstance(block_results[0], list) else block_results[0])
-                                
-                                # Get the block UID if available
-                                block_uid = None
-                                if isinstance(block_results[0], list) and len(block_results[0]) > 0:
-                                    first_block = block_results[0][0]
-                                    if isinstance(first_block, dict) and ":block/uid" in first_block:
-                                        block_uid = first_block.get(":block/uid")
-                                
-                                if block_uid:
-                                    print(f"\n4. Getting details for block with UID: {block_uid}")
-                                    try:
-                                        block_data = roam.get_block(block_uid)
-                                        print("Block details:")
-                                        print_formatted_json(block_data)
-                                    except Exception as e:
-                                        print(f"Error fetching block: {e}")
-                        else:
-                            print(f"No blocks found for page '{first_page}'")
+                        # Look for blocks on this page
+                        print("\n4. Looking for blocks on this page...")
+                        if 'children' in page_data and page_data['children']:
+                            print(f"Found {len(page_data['children'])} blocks on page '{first_page}'")
                             
-                            # Let's try a more general query to find any blocks
-                            print("\n3b. Running a query to find any blocks...")
-                            try:
-                                any_block_query = '[:find (pull ?b [:block/string :block/uid]) :where [?b :block/string ?s]]'
-                                any_blocks = roam.run_query(any_block_query)
+                            # Display the first block
+                            first_block = page_data['children'][0]
+                            print("\nFirst block:")
+                            print_formatted_json(first_block)
+                            
+                            # Get the block UID if available
+                            if 'uid' in first_block:
+                                block_uid = first_block['uid']
+                                print(f"\n5. Getting details for block with UID '{block_uid}'...")
                                 
-                                if any_blocks and isinstance(any_blocks, list) and len(any_blocks) > 0:
-                                    print(f"Found {len(any_blocks)} blocks in the graph (showing first 5):")
-                                    for idx, block in enumerate(any_blocks[:5], 1):
-                                        print(f"{idx}. {block[0] if isinstance(block, list) else block}")
-                                else:
-                                    print("No blocks found in the graph.")
-                            except Exception as e:
-                                print(f"Error running general block query: {e}")
-                                
+                                try:
+                                    block_data = roam.get_block(block_uid)
+                                    print("Block details:")
+                                    print_formatted_json(block_data)
+                                except Exception as e:
+                                    print(f"Error fetching block details: {e}")
+                        else:
+                            print(f"No blocks found on page '{first_page}'")
                     except Exception as e:
-                        print(f"Error querying blocks: {e}")
+                        print(f"Error fetching page details: {e}")
             else:
-                print("No pages found or unexpected results format:", results)
+                print("No pages found in the graph.")
         except Exception as e:
-            print(f"Query failed: {e}")
+            print(f"Error running query: {e}")
 
     except Exception as e:
         print(f"Error: {e}")

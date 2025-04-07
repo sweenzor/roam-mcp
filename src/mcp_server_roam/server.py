@@ -9,7 +9,7 @@ from enum import Enum
 from dotenv import load_dotenv
 
 # Import our Roam API client
-# from src.mcp_server_roam.roam_api import RoamAPI
+from src.mcp_server_roam.roam_api import RoamAPI
 
 # Load environment variables from .env file
 load_dotenv()
@@ -43,11 +43,6 @@ def roam_fetch_page_by_title(title: str) -> str:
     
     This uses the Roam API to fetch the page content and converts it to a nested markdown format.
     """
-    # Mock implementation for now
-    return f"Contents of page '{title}':\n\n- This is a mock implementation\n  - We would fetch the actual page content from Roam\n  - And convert it to markdown format\n- With proper formatting"
-    
-    # Actual implementation (commented out until we have a working API token)
-    """
     try:
         # Initialize Roam API client
         roam = RoamAPI()
@@ -59,18 +54,21 @@ def roam_fetch_page_by_title(title: str) -> str:
         markdown = f"# {title}\n\n"
         
         # Process children blocks
-        if "children" in page_data and page_data["children"]:
-            for child in page_data["children"]:
-                markdown += f"- {child.get('string', '')}\n"
+        if ":children" in page_data and page_data[":children"]:
+            for child in page_data[":children"]:
+                # Get the block string content, default to empty string if not found
+                block_string = child.get(":block/string", "")
+                markdown += f"- {block_string}\n"
+                
                 # Process nested children (simplistic implementation)
-                if "children" in child and child["children"]:
-                    for grandchild in child["children"]:
-                        markdown += f"  - {grandchild.get('string', '')}\n"
+                if ":children" in child and child[":children"]:
+                    for grandchild in child[":children"]:
+                        grandchild_string = grandchild.get(":block/string", "")
+                        markdown += f"  - {grandchild_string}\n"
         
         return markdown
     except Exception as e:
         return f"Error fetching page: {str(e)}"
-    """
 
 def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optional[str] = None) -> dict[str, Any]:
     """
@@ -79,28 +77,40 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
     This uses the Roam API to create a new block in the specified page,
     or in today's Daily Note if no page is specified.
     """
-    # Mock implementation for now
-    target = title if title else page_uid if page_uid else "Today's Daily Note"
-    return {
-        "success": True,
-        "block_uid": "mock-block-uid",
-        "parent_uid": "mock-parent-uid",
-        "message": f"Created block in '{target}' with content: {content}"
-    }
-    
-    # Actual implementation (commented out until we have a working API token)
-    """
     try:
         # Initialize Roam API client
         roam = RoamAPI()
         
+        # If title is provided and page_uid is not, first get the page UID
+        if title and not page_uid:
+            try:
+                # Find the page by title
+                query = f'[:find ?uid :where [?e :node/title "{title}"] [?e :block/uid ?uid]]'
+                results = roam.run_query(query)
+                
+                if results and len(results) > 0:
+                    page_uid = results[0][0]
+                else:
+                    # If page doesn't exist, we might want to create it first
+                    return {
+                        "success": False,
+                        "error": f"Page with title '{title}' not found",
+                        "message": f"Failed to create block: Page with title '{title}' not found"
+                    }
+            except Exception as e:
+                return {
+                    "success": False,
+                    "error": str(e),
+                    "message": f"Failed to find page by title: {str(e)}"
+                }
+                
         # Create the block
-        result = roam.create_block(content, page_uid, title)
+        result = roam.create_block(content, page_uid)
         
         return {
             "success": True,
             "block_uid": result.get("uid", "unknown"),
-            "parent_uid": result.get("parent-uid", "unknown"),
+            "parent_uid": page_uid or "daily-note",
             "message": f"Created block successfully with content: {content}"
         }
     except Exception as e:
@@ -109,7 +119,6 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
             "error": str(e),
             "message": f"Failed to create block: {str(e)}"
         }
-    """
 
 # Create the server instance - this is what mcp dev looks for
 server = Server("mcp-roam")

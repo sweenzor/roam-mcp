@@ -2,8 +2,14 @@
 import os
 import requests
 import json
+import re
+import logging
 from typing import Any, Dict, List, Optional, Union
 from dotenv import load_dotenv
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -26,56 +32,83 @@ class RoamAPI:
             raise ValueError("Roam API token not provided and ROAM_API_TOKEN env var not set")
         if not self.graph_name:
             raise ValueError("Roam graph name not provided and ROAM_GRAPH_NAME env var not set")
-            
-        self.base_url = "https://api.roamresearch.com/api/graph"
-        print(f"API Token: {self.api_token[:5]}...{self.api_token[-5:]}")
-        print(f"Graph Name: {self.graph_name}")
-        # Try with Bearer token format
-        self.headers = {
-            "Authorization": f"Bearer {self.api_token}",
-            "Content-Type": "application/json",
-            "X-Graph": f"{self.graph_name}"  # Add graph name in X-Graph header
-        }
-        print(f"Authorization header: {self.headers['Authorization'][:10]}...")
-        print(f"X-Graph header: {self.headers['X-Graph']}")
+        
+        # Initialize with the base URL
+        self.__cache = {}
+        logger.info(f"Initialized RoamAPI client for graph: {self.graph_name}")
     
-    def _make_request(self, endpoint: str, method: str = "GET", data: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+    def __make_request(self, path: str, body: Dict[str, Any], method: str = "POST"):
         """
-        Make a request to the Roam API.
+        Prepare a request to the Roam API, handling redirects and caching.
         
         Args:
-            endpoint: API endpoint to request.
-            method: HTTP method to use (GET, POST, etc.).
-            data: Request data for POST/PUT requests.
+            path: API endpoint path.
+            body: Request body data.
+            method: HTTP method to use (default: POST).
             
         Returns:
-            JSON response from the API.
+            Tuple of (url, method, headers).
         """
-        # Try to embed the graph name in the URL as seen in the error messages
-        url = f"{self.base_url}/{self.graph_name}/{endpoint}"
-        print(f"Making {method} request to: {url}")
+        if self.graph_name in self.__cache:
+            base_url = self.__cache[self.graph_name]
+        else:
+            base_url = 'https://api.roamresearch.com'
         
-        try:
-            if method == "GET":
-                response = requests.get(url, headers=self.headers)
-            elif method == "POST":
-                print(f"Request data: {json.dumps(data)}")
-                response = requests.post(url, headers=self.headers, json=data)
-            else:
-                raise ValueError(f"Unsupported HTTP method: {method}")
+        headers = {
+            'Content-Type': 'application/json; charset=utf-8',
+            'Authorization': 'Bearer ' + self.api_token,
+            'x-authorization': 'Bearer ' + self.api_token  # Include both headers as in the SDK
+        }
+        
+        return (base_url + path, method, headers)
+    
+    def call(self, path: str, method: str, body: Dict[str, Any]) -> requests.Response:
+        """
+        Make an API call to Roam, following redirects if necessary.
+        
+        Args:
+            path: API endpoint path.
+            method: HTTP method to use.
+            body: Request body data.
             
-            # Print response details for debugging
-            print(f"Response status: {response.status_code}")
-            if response.status_code >= 400:
-                print(f"Error response: {response.text}")
-                
-            response.raise_for_status()
-            return response.json()
-        except requests.exceptions.RequestException as e:
-            print(f"Request failed: {e}")
-            if hasattr(e, 'response') and e.response is not None:
-                print(f"Response text: {e.response.text}")
-            raise
+        Returns:
+            Response object.
+        """
+        url, method, headers = self.__make_request(path, body, method)
+        logger.info(f"Making {method} request to: {url}")
+        logger.info(f"Request headers: {headers}")
+        logger.info(f"Request body: {body}")
+        
+        resp = requests.post(url, headers=headers, json=body, allow_redirects=False)
+        
+        # Handle redirects manually to cache the new URL
+        if resp.is_redirect or resp.status_code == 307:
+            if 'Location' in resp.headers:
+                logger.info(f"Received redirect to: {resp.headers['Location']}")
+                mtch = re.search(r'https://(peer-\d+).*?:(\d+).*', resp.headers['Location'])
+                if mtch is None:
+                    raise Exception(f"Could not parse redirect URL: {resp.headers['Location']}")
+                peer_n, port = mtch.groups()
+                self.__cache[self.graph_name] = redirect_url = f'https://{peer_n}.api.roamresearch.com:{port}'
+                logger.info(f"Cached redirect URL: {redirect_url}")
+                return self.call(path, method, body)
+            else:
+                raise Exception(f"Redirect without Location header: {resp.headers}")
+        
+        # Handle errors
+        if not resp.ok:
+            logger.error(f"Error response status: {resp.status_code}")
+            logger.error(f"Error response body: {resp.text}")
+            if resp.status_code == 500:
+                raise Exception(f'Server error (HTTP 500): {str(resp.text)}')
+            elif resp.status_code == 400:
+                raise Exception(f'Bad request (HTTP 400): {str(resp.text)}')
+            elif resp.status_code == 401:
+                raise Exception(f"Authentication error (HTTP 401): Invalid token or insufficient privileges")
+            else:
+                raise Exception(f'Service unavailable (HTTP {resp.status_code}): Your graph may not be ready yet, please retry in a few seconds.')
+        
+        return resp
     
     def run_query(self, query: str, args: Optional[Dict[str, Any]] = None) -> List[Any]:
         """
@@ -88,11 +121,32 @@ class RoamAPI:
         Returns:
             Query results.
         """
-        data = {"query": query}
-        if args:
-            data["args"] = args
+        path = f'/api/graph/{self.graph_name}/q'
+        body = {'query': query}
+        if args is not None:
+            body['args'] = args
+        
+        resp = self.call(path, 'POST', body)
+        result = resp.json()
+        return result.get('result', [])
+    
+    def pull(self, eid: str, pattern: str = "[*]") -> Dict[str, Any]:
+        """
+        Get an entity by its ID.
+        
+        Args:
+            eid: Entity ID to pull.
+            pattern: Pull pattern.
             
-        return self._make_request("q", method="POST", data=data)
+        Returns:
+            Entity data.
+        """
+        path = f'/api/graph/{self.graph_name}/pull'
+        body = {'eid': eid, 'selector': pattern}
+        
+        resp = self.call(path, 'POST', body)
+        result = resp.json()
+        return result.get('result', {})
     
     def get_block(self, block_uid: str) -> Dict[str, Any]:
         """
@@ -104,8 +158,16 @@ class RoamAPI:
         Returns:
             Block data.
         """
-        data = {"uid": block_uid}
-        return self._make_request("pull", method="POST", data=data)
+        # First find the entity ID for the block
+        query = f'[:find ?e :where [?e :block/uid "{block_uid}"]]'
+        results = self.run_query(query)
+        
+        if not results or len(results) == 0:
+            raise ValueError(f"Block with UID '{block_uid}' not found")
+        
+        # Pull the block data
+        eid = results[0][0]
+        return self.pull(eid)
     
     def get_page(self, page_title: str) -> Dict[str, Any]:
         """
@@ -117,40 +179,64 @@ class RoamAPI:
         Returns:
             Page data.
         """
-        # First, use a query to find the page by title
-        query = '[:find (pull ?e [*]) :where [?e :node/title ?title] [(= ?title "' + page_title + '")]]'
+        # First find the entity ID for the page
+        query = f'[:find ?e :where [?e :node/title "{page_title}"]]'
         results = self.run_query(query)
         
         if not results or len(results) == 0:
             raise ValueError(f"Page with title '{page_title}' not found")
-            
-        return results[0][0]
+        
+        # Pull the page data with its children
+        eid = results[0][0]
+        return self.pull(eid)
     
-    def create_block(self, content: str, page_uid: Optional[str] = None, page_title: Optional[str] = None) -> Dict[str, Any]:
+    def create_block(self, content: str, page_uid: Optional[str] = None, parent_uid: Optional[str] = None) -> Dict[str, Any]:
         """
-        Create a new block in a Roam page.
+        Create a new block in a Roam page or under a parent block.
         
         Args:
             content: Content of the block to create.
-            page_uid: UID of the page to add the block to. Either page_uid or page_title must be provided.
-            page_title: Title of the page to add the block to. Either page_uid or page_title must be provided.
+            page_uid: UID of the page to add the block to.
+            parent_uid: UID of the parent block to add the block to.
             
         Returns:
             Created block data.
         """
-        data = {
-            "action": "create-block",
-            "block": {"string": content}
+        if not page_uid and not parent_uid:
+            # Default to today's Daily Notes
+            from datetime import datetime
+            today = datetime.now().strftime("%m-%d-%Y")
+            
+            # Find the daily notes page
+            query = f'[:find ?e :where [?e :node/title "{today}"]]'
+            results = self.run_query(query)
+            
+            if not results or len(results) == 0:
+                raise ValueError(f"Daily Notes page for '{today}' not found")
+                
+            # Get the UID
+            daily_page_query = f'[:find ?uid :where [?e :node/title "{today}"] [?e :block/uid ?uid]]'
+            uid_results = self.run_query(daily_page_query)
+            
+            if not uid_results or len(uid_results) == 0:
+                raise ValueError(f"Could not find UID for daily page '{today}'")
+                
+            parent_uid = uid_results[0][0]
+        
+        # Prepare the request
+        path = f'/api/graph/{self.graph_name}/write'
+        
+        # Create the block under the specified parent
+        body = {
+            'action': 'create-block',
+            'location': {
+                'parent-uid': parent_uid or page_uid,
+                'order': 0  # Add at the beginning
+            },
+            'block': {
+                'string': content
+            }
         }
         
-        if page_uid:
-            data["location"] = {"parent-uid": page_uid}
-        elif page_title:
-            data["location"] = {"page-title": page_title}
-        else:
-            # Default to Daily Notes
-            from datetime import datetime
-            today = datetime.now().strftime("%B %d, %Y")
-            data["location"] = {"page-title": today}
-            
-        return self._make_request("write", method="POST", data=data)
+        resp = self.call(path, 'POST', body)
+        return resp.json()
