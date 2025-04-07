@@ -21,6 +21,9 @@ class RoamHelloWorld(BaseModel):
 class RoamFetchPageByTitle(BaseModel):
     title: str
 
+class RoamGetPageMarkdown(BaseModel):
+    title: str
+
 class RoamCreateBlock(BaseModel):
     content: str
     page_uid: Optional[str] = None
@@ -30,12 +33,76 @@ class RoamCreateBlock(BaseModel):
 class RoamTools(str, Enum):
     HELLO_WORLD = "roam_hello_world"
     FETCH_PAGE_BY_TITLE = "roam_fetch_page_by_title"
+    GET_PAGE_MARKDOWN = "roam_get_page_markdown"
     CREATE_BLOCK = "roam_create_block"
 
 # Tool implementation functions
 def roam_hello_world(name: str = "World") -> str:
     """Simple hello world tool for Roam Research MCP."""
     return f"Hello, {name}! This is the Roam Research MCP server."
+
+def roam_get_page_markdown(title: str) -> str:
+    """
+    Retrieve a page's content in clean markdown format.
+    
+    This uses the Roam API to fetch the page content and converts it to a well-formatted
+    markdown representation, suitable for display or further processing.
+    
+    Args:
+        title: Title of the page to fetch
+        
+    Returns:
+        Markdown-formatted page content with proper nesting and references
+    """
+    try:
+        # Initialize Roam API client
+        roam = RoamAPI()
+        
+        # Get the page by title
+        page_data = roam.get_page(title)
+        
+        # Create markdown output
+        markdown = f"# {title}\n\n"
+        
+        # Process children blocks
+        if ":block/children" in page_data and page_data[":block/children"]:
+            for child in page_data[":block/children"]:
+                # Get the block string content
+                block_string = child.get(":block/string", "")
+                if not block_string:  # Skip empty blocks
+                    continue
+                    
+                markdown += f"- {block_string}\n"
+                
+                # Process nested children
+                has_non_empty_children = False
+                nested_content = ""
+                
+                if ":block/children" in child and child[":block/children"]:
+                    for grandchild in child[":block/children"]:
+                        grandchild_string = grandchild.get(":block/string", "")
+                        if not grandchild_string:  # Skip empty blocks
+                            continue
+                            
+                        has_non_empty_children = True
+                        nested_content += f"  - {grandchild_string}\n"
+                        
+                        # Process one more level of nesting
+                        if ":block/children" in grandchild and grandchild[":block/children"]:
+                            for great_grandchild in grandchild[":block/children"]:
+                                great_grandchild_string = great_grandchild.get(":block/string", "")
+                                if not great_grandchild_string:  # Skip empty blocks
+                                    continue
+                                    
+                                nested_content += f"    - {great_grandchild_string}\n"
+                
+                # Only add nested content if there are non-empty children
+                if has_non_empty_children:
+                    markdown += nested_content
+        
+        return markdown
+    except Exception as e:
+        return f"Error fetching page: {str(e)}"
 
 def roam_fetch_page_by_title(title: str) -> str:
     """
@@ -144,6 +211,11 @@ async def list_tools() -> list[Tool]:
             inputSchema=RoamFetchPageByTitle.schema(),
         ),
         Tool(
+            name=RoamTools.GET_PAGE_MARKDOWN,
+            description="Retrieve a page's content in clean markdown format",
+            inputSchema=RoamGetPageMarkdown.schema(),
+        ),
+        Tool(
             name=RoamTools.CREATE_BLOCK,
             description="Add a new block to a Roam page",
             inputSchema=RoamCreateBlock.schema(),
@@ -166,6 +238,13 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             return [TextContent(
                 type="text",
                 text=page_content
+            )]
+            
+        case RoamTools.GET_PAGE_MARKDOWN:
+            markdown_content = roam_get_page_markdown(arguments["title"])
+            return [TextContent(
+                type="text",
+                text=markdown_content
             )]
             
         case RoamTools.CREATE_BLOCK:
