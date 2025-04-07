@@ -54,17 +54,23 @@ def roam_fetch_page_by_title(title: str) -> str:
         markdown = f"# {title}\n\n"
         
         # Process children blocks
-        if ":children" in page_data and page_data[":children"]:
-            for child in page_data[":children"]:
+        if ":block/children" in page_data and page_data[":block/children"]:
+            for child in page_data[":block/children"]:
                 # Get the block string content, default to empty string if not found
                 block_string = child.get(":block/string", "")
                 markdown += f"- {block_string}\n"
                 
                 # Process nested children (simplistic implementation)
-                if ":children" in child and child[":children"]:
-                    for grandchild in child[":children"]:
+                if ":block/children" in child and child[":block/children"]:
+                    for grandchild in child[":block/children"]:
                         grandchild_string = grandchild.get(":block/string", "")
                         markdown += f"  - {grandchild_string}\n"
+                        
+                        # Process one more level of nesting
+                        if ":block/children" in grandchild and grandchild[":block/children"]:
+                            for great_grandchild in grandchild[":block/children"]:
+                                great_grandchild_string = great_grandchild.get(":block/string", "")
+                                markdown += f"    - {great_grandchild_string}\n"
         
         return markdown
     except Exception as e:
