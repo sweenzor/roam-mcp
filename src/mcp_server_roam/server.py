@@ -14,6 +14,35 @@ from mcp_server_roam.roam_api import RoamAPI
 # Load environment variables from .env file
 load_dotenv()
 
+def process_blocks(blocks, depth: int) -> str:
+    """
+    Recursively process blocks and convert them to markdown.
+    
+    Args:
+        blocks: List of blocks to process
+        depth: Current nesting level (0 = top level)
+        
+    Returns:
+        Markdown-formatted blocks with proper indentation
+    """
+    result = ""
+    indent = "  " * depth
+    
+    for block in blocks:
+        # Get the block string content
+        block_string = block.get(":block/string", "")
+        if not block_string:  # Skip empty blocks
+            continue
+            
+        # Add this block with proper indentation
+        result += f"{indent}- {block_string}\n"
+        
+        # Process children recursively if they exist
+        if ":block/children" in block and block[":block/children"]:
+            result += process_blocks(block[":block/children"], depth + 1)
+    
+    return result
+
 # Pydantic models for tool inputs
 class RoamHelloWorld(BaseModel):
     name: str = "World"
@@ -64,41 +93,9 @@ def roam_get_page_markdown(title: str) -> str:
         # Create markdown output
         markdown = f"# {title}\n\n"
         
-        # Process children blocks
+        # Process children blocks recursively
         if ":block/children" in page_data and page_data[":block/children"]:
-            for child in page_data[":block/children"]:
-                # Get the block string content
-                block_string = child.get(":block/string", "")
-                if not block_string:  # Skip empty blocks
-                    continue
-                    
-                markdown += f"- {block_string}\n"
-                
-                # Process nested children
-                has_non_empty_children = False
-                nested_content = ""
-                
-                if ":block/children" in child and child[":block/children"]:
-                    for grandchild in child[":block/children"]:
-                        grandchild_string = grandchild.get(":block/string", "")
-                        if not grandchild_string:  # Skip empty blocks
-                            continue
-                            
-                        has_non_empty_children = True
-                        nested_content += f"  - {grandchild_string}\n"
-                        
-                        # Process one more level of nesting
-                        if ":block/children" in grandchild and grandchild[":block/children"]:
-                            for great_grandchild in grandchild[":block/children"]:
-                                great_grandchild_string = great_grandchild.get(":block/string", "")
-                                if not great_grandchild_string:  # Skip empty blocks
-                                    continue
-                                    
-                                nested_content += f"    - {great_grandchild_string}\n"
-                
-                # Only add nested content if there are non-empty children
-                if has_non_empty_children:
-                    markdown += nested_content
+            markdown += process_blocks(page_data[":block/children"], 0)
         
         return markdown
     except Exception as e:

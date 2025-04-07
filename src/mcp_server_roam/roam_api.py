@@ -186,9 +186,10 @@ class RoamAPI:
         if not results or len(results) == 0:
             raise ValueError(f"Page with title '{page_title}' not found")
         
-        # Pull the page data with a specific pattern to include children and their children
+        # Pull the page data with a recursive pull pattern to get all nested blocks
         eid = results[0][0]
-        pattern = "[* {:block/children [* {:block/children [*]}]}]"
+        # The ... notation means "recursively pull this pattern"
+        pattern = "[* {:block/children ...}]"
         return self.pull(eid, pattern)
     
     def create_block(self, content: str, page_uid: Optional[str] = None, parent_uid: Optional[str] = None) -> Dict[str, Any]:
