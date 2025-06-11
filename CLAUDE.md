@@ -22,6 +22,8 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - MCP install to Claude Desktop: `uv run mcp install`
 - Test client: `python test_client.py`
 
+**Pre-commit checklist**: Always run the full test suite (`uv run pytest`) before making any commits to ensure no regressions are introduced
+
 ## Code Style Guidelines
 - PEP 8 compliant with Black formatting (88-character line length)
 - Use type hints for all function parameters and return values
