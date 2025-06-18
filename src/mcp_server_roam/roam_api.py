@@ -450,32 +450,3 @@ class RoamAPI:
                 result += self._process_blocks_with_links(block[":block/children"], depth + 1, linked_pages)
         
         return result
-    
-    def _process_blocks_simple(self, blocks, depth: int) -> str:
-        """
-        Simple block processing without link extraction.
-        
-        Args:
-            blocks: List of blocks to process
-            depth: Current nesting level
-            
-        Returns:
-            Markdown-formatted blocks with proper indentation
-        """
-        result = ""
-        indent = "  " * depth
-        
-        for block in blocks:
-            # Get the block string content
-            block_string = block.get(":block/string", "")
-            if not block_string:  # Skip empty blocks
-                continue
-            
-            # Add this block with proper indentation
-            result += f"{indent}- {block_string}\n"
-            
-            # Process children recursively if they exist
-            if ":block/children" in block and block[":block/children"]:
-                result += self._process_blocks_simple(block[":block/children"], depth + 1)
-        
-        return result
