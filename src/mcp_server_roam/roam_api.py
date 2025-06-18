@@ -388,7 +388,7 @@ class RoamAPI:
                 
                 # Add the daily note content
                 if ":block/children" in page_data and page_data[":block/children"]:
-                    daily_markdown = self._process_blocks_simple(page_data[":block/children"], 0)
+                    daily_markdown = self._process_blocks_with_links(page_data[":block/children"], 0, set())
                     if daily_markdown.strip():
                         day_content.append("### Daily Note Content\n")
                         day_content.append(daily_markdown)
