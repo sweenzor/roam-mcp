@@ -1,10 +1,9 @@
 """Interface to the Roam Research API."""
 import os
 import requests
-import json
 import re
 import logging
-from typing import Any, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional
 from dotenv import load_dotenv
 
 # Set up logging
@@ -104,7 +103,7 @@ class RoamAPI:
             elif resp.status_code == 400:
                 raise Exception(f'Bad request (HTTP 400): {str(resp.text)}')
             elif resp.status_code == 401:
-                raise Exception(f"Authentication error (HTTP 401): Invalid token or insufficient privileges")
+                raise Exception("Authentication error (HTTP 401): Invalid token or insufficient privileges")
             else:
                 raise Exception(f'Service unavailable (HTTP {resp.status_code}): Your graph may not be ready yet, please retry in a few seconds.')
         
@@ -147,6 +146,41 @@ class RoamAPI:
         resp = self.call(path, 'POST', body)
         result = resp.json()
         return result.get('result', {})
+    
+    def get_references_to_page(self, page_title: str, max_results: int = 20) -> List[Dict[str, Any]]:
+        """
+        Get blocks that reference a specific page (backlinks).
+        
+        Args:
+            page_title: Title of the page to find references to
+            max_results: Maximum number of references to return
+            
+        Returns:
+            List of blocks that contain references to the page
+        """
+        # Query to find blocks that contain the page reference
+        # Using clojure.string/includes? to search for the page title in block strings
+        query = f'''[:find ?block-uid ?block-string
+                     :where 
+                     [?b :block/uid ?block-uid]
+                     [?b :block/string ?block-string]
+                     [(clojure.string/includes? ?block-string "[[{page_title}]]")]]'''
+        
+        try:
+            results = self.run_query(query)
+            references = []
+            
+            for result in results[:max_results]:  # Limit results
+                block_uid, block_string = result
+                references.append({
+                    'uid': block_uid,
+                    'string': block_string
+                })
+            
+            return references
+        except Exception as e:
+            logger.error(f"Error finding references to {page_title}: {e}")
+            return []
     
     def get_block(self, block_uid: str) -> Dict[str, Any]:
         """
@@ -242,3 +276,206 @@ class RoamAPI:
         
         resp = self.call(path, 'POST', body)
         return resp.json()
+    
+    def find_daily_note_format(self) -> str:
+        """
+        Try to find the correct date format for daily notes by testing common formats.
+        
+        Returns:
+            The date format string that works for today's daily note
+        """
+        from datetime import datetime
+        
+        today = datetime.now()
+        # Common Roam daily note formats
+        formats_to_try = [
+            "%B %d, %Y",     # "June 13, 2025"
+            "%B %dth, %Y",   # "June 13th, 2025" 
+            "%B %dst, %Y",   # "June 1st, 2025"
+            "%B %dnd, %Y",   # "June 2nd, 2025"
+            "%B %drd, %Y",   # "June 3rd, 2025"
+            "%m-%d-%Y",      # "06-13-2025"
+            "%Y-%m-%d",      # "2025-06-13"
+            "%d-%m-%Y",      # "13-06-2025"
+            "%m/%d/%Y",      # "06/13/2025"
+            "%Y/%m/%d",      # "2025/06/13"
+            "%d/%m/%Y",      # "13/06/2025"
+        ]
+        
+        for fmt in formats_to_try:
+            try:
+                if fmt in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
+                    # Handle ordinal suffixes
+                    day = today.day
+                    if day in [1, 21, 31]:
+                        suffix = "st"
+                    elif day in [2, 22]:
+                        suffix = "nd" 
+                    elif day in [3, 23]:
+                        suffix = "rd"
+                    else:
+                        suffix = "th"
+                    
+                    date_str = today.strftime(f"%B %d{suffix}, %Y")
+                else:
+                    date_str = today.strftime(fmt)
+                
+                logger.info(f"Trying daily note format: {date_str}")
+                
+                # Try to find this page
+                query = f'[:find ?e :where [?e :node/title "{date_str}"]]'
+                results = self.run_query(query)
+                
+                if results and len(results) > 0:
+                    logger.info(f"Found daily note with format: {fmt} -> {date_str}")
+                    return fmt
+                    
+            except Exception as e:
+                logger.debug(f"Format {fmt} failed: {e}")
+                continue
+        
+        # If no format worked, return default
+        logger.warning("No daily note format found, using default")
+        return "%m-%d-%Y"
+    
+    def get_daily_notes_context(self, days: int = 10, max_references: int = 10) -> str:
+        """
+        Get the last N days of daily notes with references TO those daily note pages.
+        
+        Args:
+            days: Number of days to fetch (default: 10)
+            max_references: Maximum references per daily note (default: 10)
+            
+        Returns:
+            Markdown formatted context with daily notes and their backlinks
+        """
+        from datetime import datetime, timedelta
+        
+        context_parts = []
+        
+        # Auto-detect the daily note format
+        date_format = self.find_daily_note_format()
+        logger.info(f"Using daily note format: {date_format}")
+        
+        # Get the last N days
+        for i in range(days):
+            date = datetime.now() - timedelta(days=i)
+            
+            # Handle ordinal suffixes for formats that need them
+            if date_format in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
+                day = date.day
+                if day in [1, 21, 31]:
+                    suffix = "st"
+                elif day in [2, 22]:
+                    suffix = "nd" 
+                elif day in [3, 23]:
+                    suffix = "rd"
+                else:
+                    suffix = "th"
+                
+                date_str = date.strftime(f"%B %d{suffix}, %Y")
+            else:
+                date_str = date.strftime(date_format)
+            
+            logger.info(f"Processing daily note: {date_str}")
+            
+            # Build this day's section
+            day_content = [f"## {date_str}\n"]
+            
+            try:
+                # Get the daily note page content
+                page_data = self.get_page(date_str)
+                
+                # Add the daily note content
+                if ":block/children" in page_data and page_data[":block/children"]:
+                    daily_markdown = self._process_blocks_simple(page_data[":block/children"], 0)
+                    if daily_markdown.strip():
+                        day_content.append("### Daily Note Content\n")
+                        day_content.append(daily_markdown)
+                
+                # Get references TO this daily note page
+                references = self.get_references_to_page(date_str, max_references)
+                if references:
+                    day_content.append(f"### References to {date_str} ({len(references)} found)\n")
+                    for ref in references:
+                        day_content.append(f"- {ref['string']}\n")
+                
+                # Only add if we have content
+                if len(day_content) > 1:  # More than just the header
+                    context_parts.append("".join(day_content))
+                    logger.info(f"Added daily note: {date_str} with {len(references)} references")
+                
+            except ValueError as e:
+                # Daily note doesn't exist for this day
+                logger.debug(f"Daily note {date_str} not found: {e}")
+                continue
+        
+        # Combine everything
+        if context_parts:
+            return "# Daily Notes Context\n\n" + "\n\n".join(context_parts)
+        else:
+            return "# Daily Notes Context\n\nNo daily notes found for the specified time range."
+    
+    def _process_blocks_with_links(self, blocks, depth: int, linked_pages: set) -> str:
+        """
+        Process blocks and extract linked page references.
+        
+        Args:
+            blocks: List of blocks to process
+            depth: Current nesting level
+            linked_pages: Set to collect linked page titles
+            
+        Returns:
+            Markdown-formatted blocks with proper indentation
+        """
+        result = ""
+        indent = "  " * depth
+        
+        for block in blocks:
+            # Get the block string content
+            block_string = block.get(":block/string", "")
+            if not block_string:  # Skip empty blocks
+                continue
+            
+            # Extract linked pages from [[Page Name]] syntax
+            page_links = re.findall(r'\[\[([^\]]+)\]\]', block_string)
+            for page_link in page_links:
+                linked_pages.add(page_link)
+            
+            # Add this block with proper indentation
+            result += f"{indent}- {block_string}\n"
+            
+            # Process children recursively if they exist
+            if ":block/children" in block and block[":block/children"]:
+                result += self._process_blocks_with_links(block[":block/children"], depth + 1, linked_pages)
+        
+        return result
+    
+    def _process_blocks_simple(self, blocks, depth: int) -> str:
+        """
+        Simple block processing without link extraction.
+        
+        Args:
+            blocks: List of blocks to process
+            depth: Current nesting level
+            
+        Returns:
+            Markdown-formatted blocks with proper indentation
+        """
+        result = ""
+        indent = "  " * depth
+        
+        for block in blocks:
+            # Get the block string content
+            block_string = block.get(":block/string", "")
+            if not block_string:  # Skip empty blocks
+                continue
+            
+            # Add this block with proper indentation
+            result += f"{indent}- {block_string}\n"
+            
+            # Process children recursively if they exist
+            if ":block/children" in block and block[":block/children"]:
+                result += self._process_blocks_simple(block[":block/children"], depth + 1)
+        
+        return result

@@ -4,11 +4,8 @@ Simple test client for the Roam MCP server.
 This script sends a request to test the roam_hello_world tool.
 """
 import asyncio
-import json
 import sys
 import os
-import subprocess
-import time
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 

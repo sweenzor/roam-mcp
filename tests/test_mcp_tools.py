@@ -6,7 +6,6 @@ and calling each tool.
 """
 
 import asyncio
-import json
 import os
 import sys
 import logging

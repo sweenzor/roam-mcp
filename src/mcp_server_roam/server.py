@@ -1,5 +1,3 @@
-import logging
-import os
 from typing import Any, Optional
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
@@ -58,12 +56,21 @@ class RoamCreateBlock(BaseModel):
     page_uid: Optional[str] = None
     title: Optional[str] = None
 
+class RoamContext(BaseModel):
+    days: int = 10
+    max_references: int = 10
+
+class RoamDebugDailyNotes(BaseModel):
+    pass
+
 # Enum for tool names
 class RoamTools(str, Enum):
     HELLO_WORLD = "roam_hello_world"
     FETCH_PAGE_BY_TITLE = "roam_fetch_page_by_title"
     GET_PAGE_MARKDOWN = "roam_get_page_markdown"
     CREATE_BLOCK = "roam_create_block"
+    CONTEXT = "roam_context"
+    DEBUG_DAILY_NOTES = "roam_debug_daily_notes"
 
 # Tool implementation functions
 def roam_hello_world(name: str = "World") -> str:
@@ -190,6 +197,74 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
             "message": f"Failed to create block: {str(e)}"
         }
 
+def roam_context(days: int = 10, max_references: int = 10) -> str:
+    """
+    Get the last N days of daily notes with their linked references for context.
+    
+    Args:
+        days: Number of days to fetch (default: 10)
+        
+    Returns:
+        Markdown formatted context with daily notes and linked references
+    """
+    try:
+        # Initialize Roam API client
+        roam = RoamAPI()
+        
+        # Get the context
+        return roam.get_daily_notes_context(days)
+    except Exception as e:
+        return f"Error fetching context: {str(e)}"
+
+def roam_debug_daily_notes() -> str:
+    """
+    Debug function to test different daily note formats and show what exists.
+    
+    Returns:
+        Debug information about daily note formats and existing pages
+    """
+    try:
+        # Initialize Roam API client
+        roam = RoamAPI()
+        
+        # Get the detected format
+        detected_format = roam.find_daily_note_format()
+        
+        from datetime import datetime, timedelta
+        debug_info = ["# Daily Notes Debug\n"]
+        debug_info.append(f"**Detected format**: `{detected_format}`\n")
+        
+        # Test the last 3 days with the detected format
+        for i in range(3):
+            date = datetime.now() - timedelta(days=i)
+            
+            # Handle ordinal suffixes for formats that need them
+            if detected_format in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
+                day = date.day
+                if day in [1, 21, 31]:
+                    suffix = "st"
+                elif day in [2, 22]:
+                    suffix = "nd" 
+                elif day in [3, 23]:
+                    suffix = "rd"
+                else:
+                    suffix = "th"
+                
+                date_str = date.strftime(f"%B %d{suffix}, %Y")
+            else:
+                date_str = date.strftime(detected_format)
+            
+            try:
+                # Try to get the page
+                page_data = roam.get_page(date_str)
+                debug_info.append(f"✅ **{date_str}**: Found (has {len(page_data.get(':block/children', []))} children)")
+            except ValueError:
+                debug_info.append(f"❌ **{date_str}**: Not found")
+        
+        return "\n".join(debug_info)
+    except Exception as e:
+        return f"Error in debug: {str(e)}"
+
 # Create the server instance - this is what mcp dev looks for
 server = Server("mcp-roam")
 
@@ -216,6 +291,16 @@ async def list_tools() -> list[Tool]:
             name=RoamTools.CREATE_BLOCK,
             description="Add a new block to a Roam page",
             inputSchema=RoamCreateBlock.schema(),
+        ),
+        Tool(
+            name=RoamTools.CONTEXT,
+            description="Get the last N days of daily notes with their linked references for context",
+            inputSchema=RoamContext.schema(),
+        ),
+        Tool(
+            name=RoamTools.DEBUG_DAILY_NOTES,
+            description="Debug daily note formats and show what daily notes exist",
+            inputSchema=RoamDebugDailyNotes.schema(),
         ),
     ]
 
@@ -255,13 +340,28 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 text=str(result)
             )]
             
+        case RoamTools.CONTEXT:
+            context_content = roam_context(
+                arguments.get("days", 10),
+                arguments.get("max_references", 10)
+            )
+            return [TextContent(
+                type="text",
+                text=context_content
+            )]
+            
+        case RoamTools.DEBUG_DAILY_NOTES:
+            debug_content = roam_debug_daily_notes()
+            return [TextContent(
+                type="text",
+                text=debug_content
+            )]
+            
         case _:
             raise ValueError(f"Unknown tool: {name}")
 
 async def serve() -> None:
     """Main server function that initializes and runs the MCP server."""
-    logger = logging.getLogger(__name__)
-    
     # Initialize and run the server
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):

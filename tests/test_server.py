@@ -1,4 +1,3 @@
-import pytest
 from unittest.mock import patch, MagicMock
 from mcp_server_roam.server import roam_hello_world, roam_fetch_page_by_title, roam_create_block
 
