@@ -87,7 +87,7 @@ Currently implemented tools:
 2. `roam_fetch_page_by_title`: Fetch page content with hierarchical structure
    - Input: page title
    - Output: Markdown representation with nested blocks
-   - Simplified version with basic formatting
+   - Simplified version with basic formatting (limited to 3 levels)
 
 3. `roam_get_page_markdown`: Retrieve page content in clean markdown format
    - Input: page title
@@ -98,6 +98,17 @@ Currently implemented tools:
    - Input: content text, optional page uid or title
    - Output: Created block UID and confirmation
 
+5. `roam_context`: Get daily notes with their backlinks for comprehensive context
+   - Input: days (default: 10), max_references (default: 10)
+   - Output: Markdown with daily note content + blocks that reference each daily note
+   - Auto-detects daily note formats (June 13th, 2025 vs 06-13-2025 etc.)
+   - Memory optimized with configurable limits
+
+6. `roam_debug_daily_notes`: Debug tool for daily note format detection
+   - Input: none
+   - Output: Shows detected daily note format and tests recent daily notes
+   - Useful for troubleshooting date format issues
+
 Future tools to consider:
 - `roam_create_page`: Create new pages with optional content
 - `roam_import_markdown`: Import nested markdown content
@@ -105,7 +116,40 @@ Future tools to consider:
 - `roam_search_by_text`: Search blocks by text content
 - `roam_search_for_tag`: Search for blocks with specific tags
 - `roam_update_block`: Update block content
-- `roam_datomic_query`: Execute Datalog queries on the Roam graph
+- `roam_delete_block`: Delete blocks by UID
+- `roam_datomic_query`: Execute custom Datalog queries on the Roam graph
+- `roam_get_block_references`: Get all blocks that reference a specific block
+- `roam_export_graph`: Export entire graph or subsets in various formats
+
+## Daily Notes Context Tool
+The `roam_context` tool is a powerful feature for understanding your recent work patterns and connected topics:
+
+### Features
+- **Auto-detection**: Automatically detects your Roam's daily note format (June 13th, 2025, 06-13-2025, etc.)
+- **Backlinks**: Finds all blocks that reference each daily note page (not content from daily notes)
+- **Memory optimized**: Configurable limits to handle large datasets without memory issues
+- **Flexible timeframes**: Fetch 1-30 days of context with configurable reference limits
+
+### Usage Examples
+- `roam_context`: Default - last 10 days, up to 10 references per day
+- `roam_context(days=3)`: Last 3 days with default reference limit
+- `roam_context(days=7, max_references=20)`: Last week with more references per day
+
+### Output Format
+```markdown
+# Daily Notes Context
+
+## June 13th, 2025
+
+### Daily Note Content
+- Your actual daily note bullets
+  - Nested content
+
+### References to June 13th, 2025 (5 found)
+- Block from project page mentioning [[June 13th, 2025]]
+- Meeting notes referencing [[June 13th, 2025]]
+- Todo scheduled for [[June 13th, 2025]]
+```
 
 ## Datalog Queries
 Roam uses Datalog for querying its graph database. Key aspects:
