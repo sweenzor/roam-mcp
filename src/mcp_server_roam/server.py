@@ -12,41 +12,38 @@ from mcp_server_roam.roam_api import RoamAPI
 # Load environment variables from .env file
 load_dotenv()
 
-def process_blocks(blocks, depth: int) -> str:
+def process_blocks(blocks: list[dict[str, Any]], depth: int) -> str:
     """
     Recursively process blocks and convert them to markdown.
-    
+
     Args:
         blocks: List of blocks to process
         depth: Current nesting level (0 = top level)
-        
+
     Returns:
         Markdown-formatted blocks with proper indentation
     """
     result = ""
     indent = "  " * depth
-    
+
     for block in blocks:
         # Get the block string content
         block_string = block.get(":block/string", "")
         if not block_string:  # Skip empty blocks
             continue
-            
+
         # Add this block with proper indentation
         result += f"{indent}- {block_string}\n"
-        
+
         # Process children recursively if they exist
         if ":block/children" in block and block[":block/children"]:
             result += process_blocks(block[":block/children"], depth + 1)
-    
+
     return result
 
 # Pydantic models for tool inputs
 class RoamHelloWorld(BaseModel):
     name: str = "World"
-
-class RoamFetchPageByTitle(BaseModel):
-    title: str
 
 class RoamGetPageMarkdown(BaseModel):
     title: str
@@ -66,7 +63,6 @@ class RoamDebugDailyNotes(BaseModel):
 # Enum for tool names
 class RoamTools(str, Enum):
     HELLO_WORLD = "roam_hello_world"
-    FETCH_PAGE_BY_TITLE = "roam_fetch_page_by_title"
     GET_PAGE_MARKDOWN = "roam_get_page_markdown"
     CREATE_BLOCK = "roam_create_block"
     CONTEXT = "roam_context"
@@ -80,72 +76,37 @@ def roam_hello_world(name: str = "World") -> str:
 def roam_get_page_markdown(title: str) -> str:
     """
     Retrieve a page's content in clean markdown format.
-    
+
     This uses the Roam API to fetch the page content and converts it to a well-formatted
     markdown representation, suitable for display or further processing.
-    
+
     Args:
         title: Title of the page to fetch
-        
+
     Returns:
         Markdown-formatted page content with proper nesting and references
     """
     try:
         # Initialize Roam API client
         roam = RoamAPI()
-        
+
         # Get the page by title
         page_data = roam.get_page(title)
-        
+
         # Create markdown output
         markdown = f"# {title}\n\n"
-        
+
         # Process children blocks recursively
         if ":block/children" in page_data and page_data[":block/children"]:
             markdown += process_blocks(page_data[":block/children"], 0)
-        
+
         return markdown
+    except ValueError as e:
+        # Page not found error
+        return f"Error: {str(e)}"
     except Exception as e:
         return f"Error fetching page: {str(e)}"
 
-def roam_fetch_page_by_title(title: str) -> str:
-    """
-    Fetch a page's content by title.
-    
-    This uses the Roam API to fetch the page content and converts it to a nested markdown format.
-    """
-    try:
-        # Initialize Roam API client
-        roam = RoamAPI()
-        
-        # Get the page by title
-        page_data = roam.get_page(title)
-        
-        # Convert page data to markdown (simplified for now)
-        markdown = f"# {title}\n\n"
-        
-        # Process children blocks
-        if ":block/children" in page_data and page_data[":block/children"]:
-            for child in page_data[":block/children"]:
-                # Get the block string content, default to empty string if not found
-                block_string = child.get(":block/string", "")
-                markdown += f"- {block_string}\n"
-                
-                # Process nested children (simplistic implementation)
-                if ":block/children" in child and child[":block/children"]:
-                    for grandchild in child[":block/children"]:
-                        grandchild_string = grandchild.get(":block/string", "")
-                        markdown += f"  - {grandchild_string}\n"
-                        
-                        # Process one more level of nesting
-                        if ":block/children" in grandchild and grandchild[":block/children"]:
-                            for great_grandchild in grandchild[":block/children"]:
-                                great_grandchild_string = great_grandchild.get(":block/string", "")
-                                markdown += f"    - {great_grandchild_string}\n"
-        
-        return markdown
-    except Exception as e:
-        return f"Error fetching page: {str(e)}"
 
 def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optional[str] = None) -> dict[str, Any]:
     """
@@ -200,70 +161,79 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
 def roam_context(days: int = 10, max_references: int = 10) -> str:
     """
     Get the last N days of daily notes with their linked references for context.
-    
+
     Args:
-        days: Number of days to fetch (default: 10)
-        
+        days: Number of days to fetch (default: 10, range: 1-30)
+        max_references: Maximum number of references per daily note (default: 10, range: 1-100)
+
     Returns:
         Markdown formatted context with daily notes and linked references
     """
     try:
+        # Validate input parameters
+        if not isinstance(days, int) or days < 1 or days > 30:
+            return "Error: 'days' parameter must be an integer between 1 and 30"
+        if not isinstance(max_references, int) or max_references < 1 or max_references > 100:
+            return "Error: 'max_references' parameter must be an integer between 1 and 100"
+
         # Initialize Roam API client
         roam = RoamAPI()
-        
+
         # Get the context
-        return roam.get_daily_notes_context(days)
+        return roam.get_daily_notes_context(days, max_references)
     except Exception as e:
         return f"Error fetching context: {str(e)}"
 
 def roam_debug_daily_notes() -> str:
     """
     Debug function to test different daily note formats and show what exists.
-    
+
     Returns:
         Debug information about daily note formats and existing pages
     """
     try:
         # Initialize Roam API client
         roam = RoamAPI()
-        
+
         # Get the detected format
         detected_format = roam.find_daily_note_format()
-        
+
         from datetime import datetime, timedelta
         debug_info = ["# Daily Notes Debug\n"]
         debug_info.append(f"**Detected format**: `{detected_format}`\n")
-        
+
         # Test the last 3 days with the detected format
         for i in range(3):
             date = datetime.now() - timedelta(days=i)
-            
+
             # Handle ordinal suffixes for formats that need them
             if detected_format in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
                 day = date.day
                 if day in [1, 21, 31]:
                     suffix = "st"
                 elif day in [2, 22]:
-                    suffix = "nd" 
+                    suffix = "nd"
                 elif day in [3, 23]:
                     suffix = "rd"
                 else:
                     suffix = "th"
-                
+
                 date_str = date.strftime(f"%B %d{suffix}, %Y")
             else:
                 date_str = date.strftime(detected_format)
-            
+
             try:
                 # Try to get the page
                 page_data = roam.get_page(date_str)
                 debug_info.append(f"✅ **{date_str}**: Found (has {len(page_data.get(':block/children', []))} children)")
             except ValueError:
                 debug_info.append(f"❌ **{date_str}**: Not found")
-        
+            except Exception as e:
+                debug_info.append(f"❌ **{date_str}**: Error - {str(e)}")
+
         return "\n".join(debug_info)
     except Exception as e:
-        return f"Error in debug: {str(e)}"
+        return f"Error: {str(e)}"
 
 # Create the server instance - this is what mcp dev looks for
 server = Server("mcp-roam")
@@ -278,13 +248,8 @@ async def list_tools() -> list[Tool]:
             inputSchema=RoamHelloWorld.schema(),
         ),
         Tool(
-            name=RoamTools.FETCH_PAGE_BY_TITLE,
-            description="Fetch and read a page's content by title",
-            inputSchema=RoamFetchPageByTitle.schema(),
-        ),
-        Tool(
             name=RoamTools.GET_PAGE_MARKDOWN,
-            description="Retrieve a page's content in clean markdown format",
+            description="Retrieve a page's content in clean markdown format with unlimited nesting depth",
             inputSchema=RoamGetPageMarkdown.schema(),
         ),
         Tool(
@@ -314,21 +279,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 type="text",
                 text=result
             )]
-            
-        case RoamTools.FETCH_PAGE_BY_TITLE:
-            page_content = roam_fetch_page_by_title(arguments["title"])
-            return [TextContent(
-                type="text",
-                text=page_content
-            )]
-            
+
         case RoamTools.GET_PAGE_MARKDOWN:
             markdown_content = roam_get_page_markdown(arguments["title"])
             return [TextContent(
                 type="text",
                 text=markdown_content
             )]
-            
+
         case RoamTools.CREATE_BLOCK:
             result = roam_create_block(
                 arguments["content"],
@@ -339,7 +297,7 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 type="text",
                 text=str(result)
             )]
-            
+
         case RoamTools.CONTEXT:
             context_content = roam_context(
                 arguments.get("days", 10),
@@ -349,14 +307,14 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 type="text",
                 text=context_content
             )]
-            
+
         case RoamTools.DEBUG_DAILY_NOTES:
             debug_content = roam_debug_daily_notes()
             return [TextContent(
                 type="text",
                 text=debug_content
             )]
-            
+
         case _:
             raise ValueError(f"Unknown tool: {name}")
 

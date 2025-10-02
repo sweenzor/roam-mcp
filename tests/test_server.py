@@ -1,5 +1,5 @@
 from unittest.mock import patch, MagicMock
-from mcp_server_roam.server import roam_hello_world, roam_fetch_page_by_title, roam_create_block
+from mcp_server_roam.server import roam_hello_world, roam_get_page_markdown, roam_create_block
 
 def test_roam_hello_world():
     # Test with default value
@@ -11,7 +11,7 @@ def test_roam_hello_world():
     assert "Hello, Roam!" in result
 
 @patch('mcp_server_roam.server.RoamAPI')
-def test_roam_fetch_page_by_title(mock_roam_api):
+def test_roam_get_page_markdown(mock_roam_api):
     # Mock the RoamAPI instance and its get_page method
     mock_instance = MagicMock()
     mock_roam_api.return_value = mock_instance
@@ -21,8 +21,8 @@ def test_roam_fetch_page_by_title(mock_roam_api):
             {":block/string": "Another test block"}
         ]
     }
-    
-    result = roam_fetch_page_by_title("Test Page")
+
+    result = roam_get_page_markdown("Test Page")
     assert "Test Page" in result
     assert "mock implementation" in result.lower()
     mock_instance.get_page.assert_called_once_with("Test Page")

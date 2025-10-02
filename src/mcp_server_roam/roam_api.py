@@ -19,21 +19,23 @@ class RoamAPI:
     def __init__(self, api_token: Optional[str] = None, graph_name: Optional[str] = None):
         """
         Initialize the Roam API client.
-        
+
         Args:
             api_token: Roam API token. If None, reads from ROAM_API_TOKEN env var.
             graph_name: Roam graph name. If None, reads from ROAM_GRAPH_NAME env var.
         """
         self.api_token = api_token or os.getenv("ROAM_API_TOKEN")
         self.graph_name = graph_name or os.getenv("ROAM_GRAPH_NAME")
-        
+
         if not self.api_token:
             raise ValueError("Roam API token not provided and ROAM_API_TOKEN env var not set")
         if not self.graph_name:
             raise ValueError("Roam graph name not provided and ROAM_GRAPH_NAME env var not set")
-        
+
         # Initialize with the base URL
         self.__cache = {}
+        # Cache for daily note format (detected once and reused)
+        self.__daily_note_format_cache: Optional[str] = None
         logger.info(f"Initialized RoamAPI client for graph: {self.graph_name}")
     
     def __make_request(self, path: str, body: Dict[str, Any], method: str = "POST"):
@@ -280,17 +282,22 @@ class RoamAPI:
     def find_daily_note_format(self) -> str:
         """
         Try to find the correct date format for daily notes by testing common formats.
-        
+        Uses caching to avoid re-detection on subsequent calls.
+
         Returns:
             The date format string that works for today's daily note
         """
+        # Return cached format if already detected
+        if self.__daily_note_format_cache is not None:
+            return self.__daily_note_format_cache
+
         from datetime import datetime
-        
+
         today = datetime.now()
         # Common Roam daily note formats
         formats_to_try = [
             "%B %d, %Y",     # "June 13, 2025"
-            "%B %dth, %Y",   # "June 13th, 2025" 
+            "%B %dth, %Y",   # "June 13th, 2025"
             "%B %dst, %Y",   # "June 1st, 2025"
             "%B %dnd, %Y",   # "June 2nd, 2025"
             "%B %drd, %Y",   # "June 3rd, 2025"
@@ -301,7 +308,7 @@ class RoamAPI:
             "%Y/%m/%d",      # "2025/06/13"
             "%d/%m/%Y",      # "13/06/2025"
         ]
-        
+
         for fmt in formats_to_try:
             try:
                 if fmt in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
@@ -310,33 +317,37 @@ class RoamAPI:
                     if day in [1, 21, 31]:
                         suffix = "st"
                     elif day in [2, 22]:
-                        suffix = "nd" 
+                        suffix = "nd"
                     elif day in [3, 23]:
                         suffix = "rd"
                     else:
                         suffix = "th"
-                    
+
                     date_str = today.strftime(f"%B %d{suffix}, %Y")
                 else:
                     date_str = today.strftime(fmt)
-                
+
                 logger.info(f"Trying daily note format: {date_str}")
-                
+
                 # Try to find this page
                 query = f'[:find ?e :where [?e :node/title "{date_str}"]]'
                 results = self.run_query(query)
-                
+
                 if results and len(results) > 0:
                     logger.info(f"Found daily note with format: {fmt} -> {date_str}")
+                    # Cache the detected format
+                    self.__daily_note_format_cache = fmt
                     return fmt
-                    
+
             except Exception as e:
                 logger.debug(f"Format {fmt} failed: {e}")
                 continue
-        
-        # If no format worked, return default
+
+        # If no format worked, use default and cache it
         logger.warning("No daily note format found, using default")
-        return "%m-%d-%Y"
+        default_format = "%m-%d-%Y"
+        self.__daily_note_format_cache = default_format
+        return default_format
     
     def get_daily_notes_context(self, days: int = 10, max_references: int = 10) -> str:
         """
