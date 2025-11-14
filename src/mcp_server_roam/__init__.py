@@ -2,6 +2,27 @@ import click
 import logging
 import sys
 from .server import serve
+from .roam_api import (
+    RoamAPI,
+    RoamAPIException,
+    PageNotFoundException,
+    BlockNotFoundException,
+    AuthenticationException,
+    RateLimitException,
+    InvalidQueryException
+)
+
+__all__ = [
+    'main',
+    'serve',
+    'RoamAPI',
+    'RoamAPIException',
+    'PageNotFoundException',
+    'BlockNotFoundException',
+    'AuthenticationException',
+    'RateLimitException',
+    'InvalidQueryException'
+]
 
 @click.command()
 @click.option("-v", "--verbose", count=True)

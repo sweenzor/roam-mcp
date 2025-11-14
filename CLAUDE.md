@@ -15,6 +15,8 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - Run tests: `uv run pytest`
 - Run single test: `uv run pytest tests/test_file.py::test_function_name -v`
 - Run specific test file: `uv run python -m tests.test_roam_api`
+- Run tests with coverage: `uv run pytest --cov=src --cov-report=term --cov-report=html`
+- View HTML coverage report: Open `htmlcov/index.html` in browser
 - Format code: `uv run black src tests`
 - Type check: `uv run mypy src`
 - Lint: `uv run ruff check src tests`
@@ -196,6 +198,8 @@ Roam uses Datalog for querying its graph database. Key aspects:
 - Manual verification with actual Roam graph data
 - Test page retrieval with different nesting levels
 - Test error handling with invalid inputs
+- **Coverage targets**: Aim for >80% code coverage for all modules
+- Use `pytest-cov` for coverage reporting (see Build and Development Commands)
 
 ## Deployment
 - For development: `uv run mcp dev`

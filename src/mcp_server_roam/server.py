@@ -6,40 +6,47 @@ from pydantic import BaseModel
 from enum import Enum
 from dotenv import load_dotenv
 
-# Import our Roam API client
-from mcp_server_roam.roam_api import RoamAPI
+# Import our Roam API client and custom exceptions
+from mcp_server_roam.roam_api import (
+    RoamAPI,
+    RoamAPIException,
+    PageNotFoundException,
+    BlockNotFoundException,
+    AuthenticationException,
+    RateLimitException,
+    InvalidQueryException
+)
 
 # Load environment variables from .env file
 load_dotenv()
 
-def process_blocks(blocks: list[dict[str, Any]], depth: int) -> str:
-    """
-    Recursively process blocks and convert them to markdown.
+# Singleton instance for RoamAPI client
+_roam_client: Optional[RoamAPI] = None
 
-    Args:
-        blocks: List of blocks to process
-        depth: Current nesting level (0 = top level)
+def get_roam_client() -> RoamAPI:
+    """
+    Get or create the singleton RoamAPI client instance.
+
+    This function implements lazy initialization of the RoamAPI client,
+    ensuring only one instance is created and reused across all tool calls.
+    This preserves caching and reduces initialization overhead.
 
     Returns:
-        Markdown-formatted blocks with proper indentation
+        The singleton RoamAPI instance
+
+    Raises:
+        AuthenticationException: If required environment variables are not set
+        RoamAPIException: If RoamAPI initialization fails
     """
-    result = ""
-    indent = "  " * depth
+    global _roam_client
 
-    for block in blocks:
-        # Get the block string content
-        block_string = block.get(":block/string", "")
-        if not block_string:  # Skip empty blocks
-            continue
+    if _roam_client is None:
+        try:
+            _roam_client = RoamAPI()
+        except RoamAPIException as e:
+            raise RoamAPIException(f"Failed to initialize RoamAPI client: {str(e)}")
 
-        # Add this block with proper indentation
-        result += f"{indent}- {block_string}\n"
-
-        # Process children recursively if they exist
-        if ":block/children" in block and block[":block/children"]:
-            result += process_blocks(block[":block/children"], depth + 1)
-
-    return result
+    return _roam_client
 
 # Pydantic models for tool inputs
 class RoamHelloWorld(BaseModel):
@@ -87,8 +94,8 @@ def roam_get_page_markdown(title: str) -> str:
         Markdown-formatted page content with proper nesting and references
     """
     try:
-        # Initialize Roam API client
-        roam = RoamAPI()
+        # Get singleton Roam API client
+        roam = get_roam_client()
 
         # Get the page by title
         page_data = roam.get_page(title)
@@ -96,15 +103,15 @@ def roam_get_page_markdown(title: str) -> str:
         # Create markdown output
         markdown = f"# {title}\n\n"
 
-        # Process children blocks recursively
+        # Process children blocks recursively using unified function from roam_api
         if ":block/children" in page_data and page_data[":block/children"]:
-            markdown += process_blocks(page_data[":block/children"], 0)
+            markdown += roam.process_blocks(page_data[":block/children"], 0)
 
         return markdown
-    except ValueError as e:
+    except PageNotFoundException as e:
         # Page not found error
         return f"Error: {str(e)}"
-    except Exception as e:
+    except RoamAPIException as e:
         return f"Error fetching page: {str(e)}"
 
 
@@ -116,9 +123,9 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
     or in today's Daily Note if no page is specified.
     """
     try:
-        # Initialize Roam API client
-        roam = RoamAPI()
-        
+        # Get singleton Roam API client
+        roam = get_roam_client()
+
         # If title is provided and page_uid is not, first get the page UID
         if title and not page_uid:
             try:
@@ -135,7 +142,7 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
                         "error": f"Page with title '{title}' not found",
                         "message": f"Failed to create block: Page with title '{title}' not found"
                     }
-            except Exception as e:
+            except RoamAPIException as e:
                 return {
                     "success": False,
                     "error": str(e),
@@ -151,7 +158,7 @@ def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optio
             "parent_uid": page_uid or "daily-note",
             "message": f"Created block successfully with content: {content}"
         }
-    except Exception as e:
+    except RoamAPIException as e:
         return {
             "success": False,
             "error": str(e),
@@ -176,12 +183,12 @@ def roam_context(days: int = 10, max_references: int = 10) -> str:
         if not isinstance(max_references, int) or max_references < 1 or max_references > 100:
             return "Error: 'max_references' parameter must be an integer between 1 and 100"
 
-        # Initialize Roam API client
-        roam = RoamAPI()
+        # Get singleton Roam API client
+        roam = get_roam_client()
 
         # Get the context
         return roam.get_daily_notes_context(days, max_references)
-    except Exception as e:
+    except RoamAPIException as e:
         return f"Error fetching context: {str(e)}"
 
 def roam_debug_daily_notes() -> str:
@@ -192,8 +199,8 @@ def roam_debug_daily_notes() -> str:
         Debug information about daily note formats and existing pages
     """
     try:
-        # Initialize Roam API client
-        roam = RoamAPI()
+        # Get singleton Roam API client
+        roam = get_roam_client()
 
         # Get the detected format
         detected_format = roam.find_daily_note_format()
@@ -226,13 +233,13 @@ def roam_debug_daily_notes() -> str:
                 # Try to get the page
                 page_data = roam.get_page(date_str)
                 debug_info.append(f"✅ **{date_str}**: Found (has {len(page_data.get(':block/children', []))} children)")
-            except ValueError:
+            except PageNotFoundException:
                 debug_info.append(f"❌ **{date_str}**: Not found")
-            except Exception as e:
+            except RoamAPIException as e:
                 debug_info.append(f"❌ **{date_str}**: Error - {str(e)}")
 
         return "\n".join(debug_info)
-    except Exception as e:
+    except RoamAPIException as e:
         return f"Error: {str(e)}"
 
 # Create the server instance - this is what mcp dev looks for

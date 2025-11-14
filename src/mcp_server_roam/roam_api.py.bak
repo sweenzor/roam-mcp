@@ -58,9 +58,8 @@ class RoamAPI:
         3. Handling edge cases like empty strings
 
         In EDN (Extensible Data Notation) and Datalog, double quotes in strings
-        are escaped by doubling them. For example:
-            Input: My "quote"
-            Output: My ""quote""
+        are escaped by doubling them. For example, the string: My "quote"
+        becomes: "My ""quote"""
 
         Args:
             value: The string value to sanitize
@@ -69,26 +68,26 @@ class RoamAPI:
             Sanitized string safe for use in Datalog queries
 
         Raises:
-            InvalidQueryException: If input contains suspicious patterns or control characters
+            ValueError: If input contains suspicious patterns or control characters
         """
         if not isinstance(value, str):
-            raise InvalidQueryException(f"Input must be a string, got {type(value).__name__}")
+            raise ValueError(f"Input must be a string, got {type(value).__name__}")
 
         # Check for null bytes and other control characters that could cause issues
         if '\x00' in value:
-            raise InvalidQueryException("Input contains null bytes")
+            raise ValueError("Input contains null bytes")
 
         # Check for suspicious patterns that might indicate query injection attempts
         # These patterns are unusual in normal page titles/UIDs and could indicate malicious intent
         suspicious_patterns = [
-            r'\[:find',   # Datalog find clause
+            r'\[:find',  # Datalog find clause
             r'\[:where',  # Datalog where clause
-            r'\[\?[a-z]',  # Logic variables (e.g., [?e, [?b)
+            r'\[?[a-z]',  # Logic variables (e.g., ?e, ?b)
         ]
 
         for pattern in suspicious_patterns:
             if re.search(pattern, value, re.IGNORECASE):
-                raise InvalidQueryException(f"Input contains suspicious pattern: {pattern}")
+                raise ValueError(f"Input contains suspicious pattern: {pattern}")
 
         # Escape double quotes by doubling them (EDN/Datalog standard)
         sanitized = value.replace('"', '""')
@@ -145,53 +144,22 @@ class RoamAPI:
         
         return (base_url + path, method, headers)
     
-    def _sanitize_headers_for_logging(self, headers: Dict[str, str]) -> Dict[str, str]:
-        """
-        Create a sanitized copy of headers for logging, masking sensitive tokens.
-
-        Args:
-            headers: Original headers dictionary.
-
-        Returns:
-            Sanitized headers with masked tokens.
-        """
-        sanitized = headers.copy()
-        for key in ['Authorization', 'x-authorization']:
-            if key in sanitized:
-                value = sanitized[key]
-                # Extract the token part after "Bearer "
-                if value.startswith('Bearer '):
-                    token = value[7:]  # Remove "Bearer " prefix
-                    if len(token) > 8:
-                        # Show first 4 and last 4 characters
-                        masked_token = f"{token[:4]}...{token[-4:]}"
-                        sanitized[key] = f"Bearer {masked_token}"
-                    else:
-                        # Token too short, mask completely
-                        sanitized[key] = "Bearer ***"
-        return sanitized
-
     def call(self, path: str, method: str, body: Dict[str, Any]) -> requests.Response:
         """
         Make an API call to Roam, following redirects if necessary.
-
+        
         Args:
             path: API endpoint path.
             method: HTTP method to use.
             body: Request body data.
-
+            
         Returns:
             Response object.
-
-        Raises:
-            InvalidQueryException: If redirect URL cannot be parsed or redirect has no Location header.
-            AuthenticationException: If authentication fails (HTTP 401).
-            RateLimitException: If rate limit is exceeded (HTTP 429).
-            RoamAPIException: For other API errors (HTTP 400, 500, etc.).
         """
         url, method, headers = self.__make_request(path, body, method)
         logger.info(f"Making {method} request to: {url}")
-        logger.info(f"Request headers: {self._sanitize_headers_for_logging(headers)}")
+        logger.info(f"Request headers: {headers}")
+        logger.info(f"Request body: {body}")
         
         resp = requests.post(url, headers=headers, json=body, allow_redirects=False)
         
@@ -201,45 +169,39 @@ class RoamAPI:
                 logger.info(f"Received redirect to: {resp.headers['Location']}")
                 mtch = re.search(r'https://(peer-\d+).*?:(\d+).*', resp.headers['Location'])
                 if mtch is None:
-                    raise InvalidQueryException(f"Could not parse redirect URL: {resp.headers['Location']}")
+                    raise Exception(f"Could not parse redirect URL: {resp.headers['Location']}")
                 peer_n, port = mtch.groups()
                 self.__cache[self.graph_name] = redirect_url = f'https://{peer_n}.api.roamresearch.com:{port}'
                 logger.info(f"Cached redirect URL: {redirect_url}")
                 return self.call(path, method, body)
             else:
-                raise InvalidQueryException(f"Redirect without Location header: {resp.headers}")
+                raise Exception(f"Redirect without Location header: {resp.headers}")
         
         # Handle errors
         if not resp.ok:
             logger.error(f"Error response status: {resp.status_code}")
             logger.error(f"Error response body: {resp.text}")
             if resp.status_code == 500:
-                raise RoamAPIException(f'Server error (HTTP 500): {str(resp.text)}')
+                raise Exception(f'Server error (HTTP 500): {str(resp.text)}')
             elif resp.status_code == 400:
-                raise InvalidQueryException(f'Bad request (HTTP 400): {str(resp.text)}')
+                raise Exception(f'Bad request (HTTP 400): {str(resp.text)}')
             elif resp.status_code == 401:
-                raise AuthenticationException("Authentication error (HTTP 401): Invalid token or insufficient privileges")
-            elif resp.status_code == 429:
-                raise RateLimitException(f'Rate limit exceeded (HTTP 429): {str(resp.text)}')
+                raise Exception("Authentication error (HTTP 401): Invalid token or insufficient privileges")
             else:
-                raise RoamAPIException(f'Service unavailable (HTTP {resp.status_code}): Your graph may not be ready yet, please retry in a few seconds.')
+                raise Exception(f'Service unavailable (HTTP {resp.status_code}): Your graph may not be ready yet, please retry in a few seconds.')
         
         return resp
     
     def run_query(self, query: str, args: Optional[Dict[str, Any]] = None) -> List[Any]:
         """
         Run a Datalog query on the Roam graph.
-
+        
         Args:
             query: Datalog query string.
             args: Optional arguments for the query.
-
+            
         Returns:
             Query results.
-
-        Raises:
-            InvalidQueryException: If the query is malformed or invalid.
-            RoamAPIException: If the API request fails.
         """
         path = f'/api/graph/{self.graph_name}/q'
         body = {'query': query}
@@ -277,13 +239,7 @@ class RoamAPI:
             max_results: Maximum number of references to return
 
         Returns:
-            List of blocks that contain references to the page.
-            Returns empty list if an error occurs during retrieval.
-
-        Note:
-            This method catches and logs RoamAPIException errors, returning an empty list
-            rather than propagating the exception. This is useful for non-critical operations
-            where missing references should not halt execution.
+            List of blocks that contain references to the page
         """
         # Sanitize input to prevent query injection
         sanitized_title = self._sanitize_query_input(page_title)
@@ -308,7 +264,7 @@ class RoamAPI:
                 })
             
             return references
-        except RoamAPIException as e:
+        except Exception as e:
             logger.error(f"Error finding references to {page_title}: {e}")
             return []
     
@@ -321,10 +277,6 @@ class RoamAPI:
 
         Returns:
             Block data.
-
-        Raises:
-            BlockNotFoundException: If the block with the specified UID is not found.
-            InvalidQueryException: If the query contains invalid patterns.
         """
         # Sanitize input to prevent query injection
         sanitized_uid = self._sanitize_query_input(block_uid)
@@ -334,7 +286,7 @@ class RoamAPI:
         results = self.run_query(query)
         
         if not results or len(results) == 0:
-            raise BlockNotFoundException(f"Block with UID '{block_uid}' not found")
+            raise ValueError(f"Block with UID '{block_uid}' not found")
         
         # Pull the block data
         eid = results[0][0]
@@ -349,10 +301,6 @@ class RoamAPI:
 
         Returns:
             Page data.
-
-        Raises:
-            PageNotFoundException: If the page with the specified title is not found.
-            InvalidQueryException: If the query contains invalid patterns.
         """
         # Sanitize input to prevent query injection
         sanitized_title = self._sanitize_query_input(page_title)
@@ -362,7 +310,7 @@ class RoamAPI:
         results = self.run_query(query)
         
         if not results or len(results) == 0:
-            raise PageNotFoundException(f"Page with title '{page_title}' not found")
+            raise ValueError(f"Page with title '{page_title}' not found")
         
         # Pull the page data with a recursive pull pattern to get all nested blocks
         eid = results[0][0]
@@ -373,19 +321,14 @@ class RoamAPI:
     def create_block(self, content: str, page_uid: Optional[str] = None, parent_uid: Optional[str] = None) -> Dict[str, Any]:
         """
         Create a new block in a Roam page or under a parent block.
-
+        
         Args:
             content: Content of the block to create.
             page_uid: UID of the page to add the block to.
             parent_uid: UID of the parent block to add the block to.
-
+            
         Returns:
             Created block data.
-
-        Raises:
-            PageNotFoundException: If the daily notes page is not found (when neither page_uid nor parent_uid provided).
-            BlockNotFoundException: If the UID for the daily page cannot be found.
-            RoamAPIException: If the API request fails.
         """
         if not page_uid and not parent_uid:
             # Default to today's Daily Notes
@@ -400,14 +343,14 @@ class RoamAPI:
             results = self.run_query(query)
 
             if not results or len(results) == 0:
-                raise PageNotFoundException(f"Daily Notes page for '{today}' not found")
+                raise ValueError(f"Daily Notes page for '{today}' not found")
 
             # Get the UID
             daily_page_query = f'[:find ?uid :where [?e :node/title "{sanitized_today}"] [?e :block/uid ?uid]]'
             uid_results = self.run_query(daily_page_query)
             
             if not uid_results or len(uid_results) == 0:
-                raise BlockNotFoundException(f"Could not find UID for daily page '{today}'")
+                raise ValueError(f"Could not find UID for daily page '{today}'")
                 
             parent_uid = uid_results[0][0]
         
@@ -505,16 +448,13 @@ class RoamAPI:
     def get_daily_notes_context(self, days: int = 10, max_references: int = 10) -> str:
         """
         Get the last N days of daily notes with references TO those daily note pages.
-
+        
         Args:
             days: Number of days to fetch (default: 10)
             max_references: Maximum references per daily note (default: 10)
-
+            
         Returns:
             Markdown formatted context with daily notes and their backlinks
-
-        Raises:
-            RoamAPIException: If there are API errors during data retrieval.
         """
         from datetime import datetime, timedelta
         
@@ -572,7 +512,7 @@ class RoamAPI:
                     context_parts.append("".join(day_content))
                     logger.info(f"Added daily note: {date_str} with {len(references)} references")
                 
-            except PageNotFoundException as e:
+            except ValueError as e:
                 # Daily note doesn't exist for this day
                 logger.debug(f"Daily note {date_str} not found: {e}")
                 continue
