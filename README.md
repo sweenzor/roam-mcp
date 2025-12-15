@@ -5,70 +5,97 @@ A Model Context Protocol (MCP) server that provides programmatic access to Roam 
 ## Installation
 
 ```bash
-# Create and activate a virtual environment
-uv venv
+# Clone and install dependencies
+uv sync
+```
 
-# Install the package in development mode
-uv pip install -e ".[dev]"
+## Configuration
+
+Set environment variables for Roam API access:
+
+```bash
+export ROAM_API_TOKEN=your-api-token
+export ROAM_GRAPH_NAME=your-graph-name
+```
+
+Or create a `.env` file in the project root:
+
+```
+ROAM_API_TOKEN=your-api-token
+ROAM_GRAPH_NAME=your-graph-name
 ```
 
 ## Usage
 
 ### Command Line
 
-Run the MCP server directly:
-
 ```bash
-# With standard logging
-uv run mcp-server-roam
+# Run the MCP server
+uv run python -m mcp_server_roam
 
 # With verbose logging
 uv run mcp-server-roam -v
-
-# With debug logging
-uv run mcp-server-roam -vv
 ```
 
-### Development
+### Claude Desktop Integration
 
-You can run the server in development mode with the MCP Inspector:
+Add to your Claude Desktop config (`~/Library/Application Support/Claude/claude_desktop_config.json`):
 
-```bash
-uv run mcp dev src/mcp_server_roam/server.py
+```json
+{
+  "mcpServers": {
+    "roam": {
+      "command": "uv",
+      "args": [
+        "--directory",
+        "/path/to/roam-mcp",
+        "run",
+        "python",
+        "-m",
+        "mcp_server_roam"
+      ],
+      "env": {
+        "ROAM_API_TOKEN": "your-roam-api-token",
+        "ROAM_GRAPH_NAME": "your-graph-name"
+      }
+    }
+  }
+}
 ```
 
-### Installation in Claude Desktop
+### Development Mode
 
-To use the server with Claude Desktop:
+Run with MCP Inspector for interactive testing:
 
 ```bash
-uv run mcp install src/mcp_server_roam/server.py
+uv run mcp dev
 ```
 
 ## Available Tools
 
-- `roam_hello_world`: Basic greeting tool for testing
-- `roam_fetch_page_by_title`: Retrieve a page's content by title (limited nesting)
-- `roam_get_page_markdown`: Retrieve page content in clean markdown format (unlimited nesting)
-- `roam_create_block`: Create a new block in a Roam page
-- `roam_context`: Get daily notes with their backlinks for comprehensive context
-- `roam_debug_daily_notes`: Debug tool for daily note format detection
+| Tool | Description |
+|------|-------------|
+| `roam_hello_world` | Simple greeting for testing connectivity |
+| `roam_get_page_markdown` | Retrieve page content as markdown (unlimited nesting) |
+| `roam_create_block` | Create a new block in a Roam page |
+| `roam_context` | Get daily notes with backlinks for context |
+| `roam_debug_daily_notes` | Debug daily note format detection |
 
 ### Key Features
 
-- **Daily Note Context**: The `roam_context` tool provides comprehensive context by fetching:
-  - Recent daily note content (configurable days)
-  - All blocks that reference each daily note (backlinks)
-  - Auto-detection of daily note formats (e.g., "June 13th, 2025", "06-13-2025")
-- **Memory Optimized**: Configurable limits to prevent memory issues with large datasets
+- **Daily Note Context**: `roam_context` fetches recent daily notes + all blocks that reference them
+- **Auto-detection**: Automatically detects daily note formats (e.g., "June 13th, 2025", "06-13-2025")
 - **Recursive Processing**: Handles unlimited block nesting depth
 - **Error Handling**: Graceful handling of missing pages and API errors
 
 ## Development
 
 ```bash
-# Run tests
+# Run unit tests
 uv run pytest
+
+# Run e2e tests (requires API credentials)
+ROAM_API_TOKEN=xxx ROAM_GRAPH_NAME=xxx uv run pytest tests/test_e2e.py -v
 
 # Format code
 uv run black src tests
@@ -79,6 +106,8 @@ uv run pyright
 # Lint
 uv run ruff check src tests
 ```
+
+> **Note**: Roam API has a 50 requests/minute rate limit.
 
 ## License
 
