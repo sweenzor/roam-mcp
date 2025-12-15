@@ -3,7 +3,6 @@ from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import Tool, TextContent
 from pydantic import BaseModel
-from enum import Enum
 from dotenv import load_dotenv
 
 # Import our Roam API client and custom exceptions
@@ -14,7 +13,8 @@ from mcp_server_roam.roam_api import (
     BlockNotFoundException,
     AuthenticationException,
     RateLimitException,
-    InvalidQueryException
+    InvalidQueryException,
+    ordinal_suffix,
 )
 
 # Load environment variables from .env file
@@ -24,28 +24,10 @@ load_dotenv()
 _roam_client: Optional[RoamAPI] = None
 
 def get_roam_client() -> RoamAPI:
-    """
-    Get or create the singleton RoamAPI client instance.
-
-    This function implements lazy initialization of the RoamAPI client,
-    ensuring only one instance is created and reused across all tool calls.
-    This preserves caching and reduces initialization overhead.
-
-    Returns:
-        The singleton RoamAPI instance
-
-    Raises:
-        AuthenticationException: If required environment variables are not set
-        RoamAPIException: If RoamAPI initialization fails
-    """
+    """Get or create the singleton RoamAPI client instance."""
     global _roam_client
-
     if _roam_client is None:
-        try:
-            _roam_client = RoamAPI()
-        except RoamAPIException as e:
-            raise RoamAPIException(f"Failed to initialize RoamAPI client: {str(e)}")
-
+        _roam_client = RoamAPI()
     return _roam_client
 
 # Pydantic models for tool inputs
@@ -67,13 +49,6 @@ class RoamContext(BaseModel):
 class RoamDebugDailyNotes(BaseModel):
     pass
 
-# Enum for tool names
-class RoamTools(str, Enum):
-    HELLO_WORLD = "roam_hello_world"
-    GET_PAGE_MARKDOWN = "roam_get_page_markdown"
-    CREATE_BLOCK = "roam_create_block"
-    CONTEXT = "roam_context"
-    DEBUG_DAILY_NOTES = "roam_debug_daily_notes"
 
 # Tool implementation functions
 def roam_hello_world(name: str = "World") -> str:
@@ -115,55 +90,25 @@ def roam_get_page_markdown(title: str) -> str:
         return f"Error fetching page: {str(e)}"
 
 
-def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optional[str] = None) -> dict[str, Any]:
-    """
-    Create a new block in a Roam page.
-    
-    This uses the Roam API to create a new block in the specified page,
-    or in today's Daily Note if no page is specified.
-    """
+def roam_create_block(content: str, page_uid: Optional[str] = None, title: Optional[str] = None) -> str:
+    """Create a new block in a Roam page."""
     try:
-        # Get singleton Roam API client
         roam = get_roam_client()
 
-        # If title is provided and page_uid is not, first get the page UID
+        # If title is provided, look up the page UID
         if title and not page_uid:
-            try:
-                # Find the page by title
-                query = f'[:find ?uid :where [?e :node/title "{title}"] [?e :block/uid ?uid]]'
-                results = roam.run_query(query)
-                
-                if results and len(results) > 0:
-                    page_uid = results[0][0]
-                else:
-                    # If page doesn't exist, we might want to create it first
-                    return {
-                        "success": False,
-                        "error": f"Page with title '{title}' not found",
-                        "message": f"Failed to create block: Page with title '{title}' not found"
-                    }
-            except RoamAPIException as e:
-                return {
-                    "success": False,
-                    "error": str(e),
-                    "message": f"Failed to find page by title: {str(e)}"
-                }
-                
-        # Create the block
+            query = f'[:find ?uid :where [?e :node/title "{title}"] [?e :block/uid ?uid]]'
+            results = roam.run_query(query)
+            if not results:
+                return f"Error: Page '{title}' not found"
+            page_uid = results[0][0]
+
         result = roam.create_block(content, page_uid)
-        
-        return {
-            "success": True,
-            "block_uid": result.get("uid", "unknown"),
-            "parent_uid": page_uid or "daily-note",
-            "message": f"Created block successfully with content: {content}"
-        }
+        block_uid = result.get("uid", "unknown")
+        return f"Created block {block_uid} with content: {content}"
+
     except RoamAPIException as e:
-        return {
-            "success": False,
-            "error": str(e),
-            "message": f"Failed to create block: {str(e)}"
-        }
+        return f"Error creating block: {e}"
 
 def roam_context(days: int = 10, max_references: int = 10) -> str:
     """
@@ -213,19 +158,8 @@ def roam_debug_daily_notes() -> str:
         for i in range(3):
             date = datetime.now() - timedelta(days=i)
 
-            # Handle ordinal suffixes for formats that need them
             if detected_format in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
-                day = date.day
-                if day in [1, 21, 31]:
-                    suffix = "st"
-                elif day in [2, 22]:
-                    suffix = "nd"
-                elif day in [3, 23]:
-                    suffix = "rd"
-                else:
-                    suffix = "th"
-
-                date_str = date.strftime(f"%B %d{suffix}, %Y")
+                date_str = date.strftime(f"%B %d{ordinal_suffix(date.day)}, %Y")
             else:
                 date_str = date.strftime(detected_format)
 
@@ -250,27 +184,27 @@ server = Server("mcp-roam")
 async def list_tools() -> list[Tool]:
     return [
         Tool(
-            name=RoamTools.HELLO_WORLD,
+            name="roam_hello_world",
             description="Simple hello world greeting from Roam MCP server",
             inputSchema=RoamHelloWorld.schema(),
         ),
         Tool(
-            name=RoamTools.GET_PAGE_MARKDOWN,
+            name="roam_get_page_markdown",
             description="Retrieve a page's content in clean markdown format with unlimited nesting depth",
             inputSchema=RoamGetPageMarkdown.schema(),
         ),
         Tool(
-            name=RoamTools.CREATE_BLOCK,
+            name="roam_create_block",
             description="Add a new block to a Roam page",
             inputSchema=RoamCreateBlock.schema(),
         ),
         Tool(
-            name=RoamTools.CONTEXT,
+            name="roam_context",
             description="Get the last N days of daily notes with their linked references for context",
             inputSchema=RoamContext.schema(),
         ),
         Tool(
-            name=RoamTools.DEBUG_DAILY_NOTES,
+            name="roam_debug_daily_notes",
             description="Debug daily note formats and show what daily notes exist",
             inputSchema=RoamDebugDailyNotes.schema(),
         ),
@@ -280,50 +214,27 @@ async def list_tools() -> list[Tool]:
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
     """Handle tool calls."""
     match name:
-        case RoamTools.HELLO_WORLD:
+        case "roam_hello_world":
             result = roam_hello_world(arguments.get("name", "World"))
-            return [TextContent(
-                type="text",
-                text=result
-            )]
-
-        case RoamTools.GET_PAGE_MARKDOWN:
-            markdown_content = roam_get_page_markdown(arguments["title"])
-            return [TextContent(
-                type="text",
-                text=markdown_content
-            )]
-
-        case RoamTools.CREATE_BLOCK:
+        case "roam_get_page_markdown":
+            result = roam_get_page_markdown(arguments["title"])
+        case "roam_create_block":
             result = roam_create_block(
                 arguments["content"],
                 arguments.get("page_uid"),
                 arguments.get("title")
             )
-            return [TextContent(
-                type="text",
-                text=str(result)
-            )]
-
-        case RoamTools.CONTEXT:
-            context_content = roam_context(
+        case "roam_context":
+            result = roam_context(
                 arguments.get("days", 10),
                 arguments.get("max_references", 10)
             )
-            return [TextContent(
-                type="text",
-                text=context_content
-            )]
-
-        case RoamTools.DEBUG_DAILY_NOTES:
-            debug_content = roam_debug_daily_notes()
-            return [TextContent(
-                type="text",
-                text=debug_content
-            )]
-
+        case "roam_debug_daily_notes":
+            result = roam_debug_daily_notes()
         case _:
             raise ValueError(f"Unknown tool: {name}")
+
+    return [TextContent(type="text", text=str(result))]
 
 async def serve() -> None:
     """Main server function that initializes and runs the MCP server."""

@@ -1,14 +1,24 @@
 """Interface to the Roam Research API."""
 import os
-import requests
 import re
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Optional
+
+import requests
 from dotenv import load_dotenv
 
-# Set up logging
-logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+
+
+def ordinal_suffix(day: int) -> str:
+    """Return ordinal suffix (st, nd, rd, th) for a day number."""
+    if day in (1, 21, 31):
+        return "st"
+    if day in (2, 22):
+        return "nd"
+    if day in (3, 23):
+        return "rd"
+    return "th"
 
 # Load environment variables from .env file
 load_dotenv()
@@ -114,70 +124,22 @@ class RoamAPI:
         if not self.graph_name:
             raise AuthenticationException("Roam graph name not provided and ROAM_GRAPH_NAME env var not set")
 
-        # Initialize with the base URL
-        self.__cache = {}
-        # Cache for daily note format (detected once and reused)
-        self.__daily_note_format_cache: Optional[str] = None
+        self._redirect_cache: dict[str, str] = {}
+        self._daily_note_format: Optional[str] = None
         logger.info(f"Initialized RoamAPI client for graph: {self.graph_name}")
-    
-    def __make_request(self, path: str, body: Dict[str, Any], method: str = "POST"):
-        """
-        Prepare a request to the Roam API, handling redirects and caching.
-        
-        Args:
-            path: API endpoint path.
-            body: Request body data.
-            method: HTTP method to use (default: POST).
-            
-        Returns:
-            Tuple of (url, method, headers).
-        """
-        if self.graph_name in self.__cache:
-            base_url = self.__cache[self.graph_name]
-        else:
-            base_url = 'https://api.roamresearch.com'
-        
-        headers = {
-            'Content-Type': 'application/json; charset=utf-8',
-            'Authorization': 'Bearer ' + self.api_token,
-            'x-authorization': 'Bearer ' + self.api_token  # Include both headers as in the SDK
-        }
-        
-        return (base_url + path, method, headers)
-    
-    def _sanitize_headers_for_logging(self, headers: Dict[str, str]) -> Dict[str, str]:
-        """
-        Create a sanitized copy of headers for logging, masking sensitive tokens.
 
-        Args:
-            headers: Original headers dictionary.
+    def _mask_token(self, token: str) -> str:
+        """Mask a token for logging, showing first/last 4 chars if long enough."""
+        if len(token) > 8:
+            return f"{token[:4]}...{token[-4:]}"
+        return "***"
 
-        Returns:
-            Sanitized headers with masked tokens.
-        """
-        sanitized = headers.copy()
-        for key in ['Authorization', 'x-authorization']:
-            if key in sanitized:
-                value = sanitized[key]
-                # Extract the token part after "Bearer "
-                if value.startswith('Bearer '):
-                    token = value[7:]  # Remove "Bearer " prefix
-                    if len(token) > 8:
-                        # Show first 4 and last 4 characters
-                        masked_token = f"{token[:4]}...{token[-4:]}"
-                        sanitized[key] = f"Bearer {masked_token}"
-                    else:
-                        # Token too short, mask completely
-                        sanitized[key] = "Bearer ***"
-        return sanitized
-
-    def call(self, path: str, method: str, body: Dict[str, Any]) -> requests.Response:
+    def call(self, path: str, body: dict[str, Any]) -> requests.Response:
         """
         Make an API call to Roam, following redirects if necessary.
 
         Args:
             path: API endpoint path.
-            method: HTTP method to use.
             body: Request body data.
 
         Returns:
@@ -189,25 +151,36 @@ class RoamAPI:
             RateLimitException: If rate limit is exceeded (HTTP 429).
             RoamAPIException: For other API errors (HTTP 400, 500, etc.).
         """
-        url, method, headers = self.__make_request(path, body, method)
-        logger.info(f"Making {method} request to: {url}")
-        logger.info(f"Request headers: {self._sanitize_headers_for_logging(headers)}")
-        
+        base_url = self._redirect_cache.get(self.graph_name, "https://api.roamresearch.com")
+        url = base_url + path
+        headers = {
+            "Content-Type": "application/json; charset=utf-8",
+            "Authorization": f"Bearer {self.api_token}",
+            "x-authorization": f"Bearer {self.api_token}",
+        }
+
+        logger.info(f"Making POST request to: {url}")
+        logger.info(f"Request headers: Authorization: Bearer {self._mask_token(self.api_token)}")
+
         resp = requests.post(url, headers=headers, json=body, allow_redirects=False)
         
         # Handle redirects manually to cache the new URL
         if resp.is_redirect or resp.status_code == 307:
-            if 'Location' in resp.headers:
-                logger.info(f"Received redirect to: {resp.headers['Location']}")
-                mtch = re.search(r'https://(peer-\d+).*?:(\d+).*', resp.headers['Location'])
-                if mtch is None:
-                    raise InvalidQueryException(f"Could not parse redirect URL: {resp.headers['Location']}")
-                peer_n, port = mtch.groups()
-                self.__cache[self.graph_name] = redirect_url = f'https://{peer_n}.api.roamresearch.com:{port}'
-                logger.info(f"Cached redirect URL: {redirect_url}")
-                return self.call(path, method, body)
-            else:
+            if "Location" not in resp.headers:
                 raise InvalidQueryException(f"Redirect without Location header: {resp.headers}")
+
+            location = resp.headers["Location"]
+            logger.info(f"Received redirect to: {location}")
+
+            match = re.search(r"https://(peer-\d+).*?:(\d+)", location)
+            if not match:
+                raise InvalidQueryException(f"Could not parse redirect URL: {location}")
+
+            peer, port = match.groups()
+            redirect_url = f"https://{peer}.api.roamresearch.com:{port}"
+            self._redirect_cache[self.graph_name] = redirect_url
+            logger.info(f"Cached redirect URL: {redirect_url}")
+            return self.call(path, body)
         
         # Handle errors
         if not resp.ok:
@@ -226,7 +199,7 @@ class RoamAPI:
         
         return resp
     
-    def run_query(self, query: str, args: Optional[Dict[str, Any]] = None) -> List[Any]:
+    def run_query(self, query: str, args: Optional[dict[str, Any]] = None) -> list[Any]:
         """
         Run a Datalog query on the Roam graph.
 
@@ -241,34 +214,23 @@ class RoamAPI:
             InvalidQueryException: If the query is malformed or invalid.
             RoamAPIException: If the API request fails.
         """
-        path = f'/api/graph/{self.graph_name}/q'
-        body = {'query': query}
+        path = f"/api/graph/{self.graph_name}/q"
+        body = {"query": query}
         if args is not None:
-            body['args'] = args
-        
-        resp = self.call(path, 'POST', body)
+            body["args"] = args
+
+        resp = self.call(path, body)
         result = resp.json()
         return result.get('result', [])
     
-    def pull(self, eid: str, pattern: str = "[*]") -> Dict[str, Any]:
-        """
-        Get an entity by its ID.
-        
-        Args:
-            eid: Entity ID to pull.
-            pattern: Pull pattern.
-            
-        Returns:
-            Entity data.
-        """
-        path = f'/api/graph/{self.graph_name}/pull'
-        body = {'eid': eid, 'selector': pattern}
-        
-        resp = self.call(path, 'POST', body)
-        result = resp.json()
-        return result.get('result', {})
+    def pull(self, eid: str, pattern: str = "[*]") -> dict[str, Any]:
+        """Get an entity by its ID."""
+        path = f"/api/graph/{self.graph_name}/pull"
+        body = {"eid": eid, "selector": pattern}
+        resp = self.call(path, body)
+        return resp.json().get("result", {})
     
-    def get_references_to_page(self, page_title: str, max_results: int = 20) -> List[Dict[str, Any]]:
+    def get_references_to_page(self, page_title: str, max_results: int = 20) -> list[dict[str, Any]]:
         """
         Get blocks that reference a specific page (backlinks).
 
@@ -312,7 +274,7 @@ class RoamAPI:
             logger.error(f"Error finding references to {page_title}: {e}")
             return []
     
-    def get_block(self, block_uid: str) -> Dict[str, Any]:
+    def get_block(self, block_uid: str) -> dict[str, Any]:
         """
         Get a block by its UID.
 
@@ -340,7 +302,7 @@ class RoamAPI:
         eid = results[0][0]
         return self.pull(eid)
     
-    def get_page(self, page_title: str) -> Dict[str, Any]:
+    def get_page(self, page_title: str) -> dict[str, Any]:
         """
         Get a page by its title.
 
@@ -370,7 +332,7 @@ class RoamAPI:
         pattern = "[* {:block/children ...}]"
         return self.pull(eid, pattern)
     
-    def create_block(self, content: str, page_uid: Optional[str] = None, parent_uid: Optional[str] = None) -> Dict[str, Any]:
+    def create_block(self, content: str, page_uid: Optional[str] = None, parent_uid: Optional[str] = None) -> dict[str, Any]:
         """
         Create a new block in a Roam page or under a parent block.
 
@@ -411,22 +373,13 @@ class RoamAPI:
                 
             parent_uid = uid_results[0][0]
         
-        # Prepare the request
-        path = f'/api/graph/{self.graph_name}/write'
-        
-        # Create the block under the specified parent
+        path = f"/api/graph/{self.graph_name}/write"
         body = {
-            'action': 'create-block',
-            'location': {
-                'parent-uid': parent_uid or page_uid,
-                'order': 0  # Add at the beginning
-            },
-            'block': {
-                'string': content
-            }
+            "action": "create-block",
+            "location": {"parent-uid": parent_uid or page_uid, "order": 0},
+            "block": {"string": content},
         }
-        
-        resp = self.call(path, 'POST', body)
+        resp = self.call(path, body)
         return resp.json()
     
     def find_daily_note_format(self) -> str:
@@ -437,9 +390,8 @@ class RoamAPI:
         Returns:
             The date format string that works for today's daily note
         """
-        # Return cached format if already detected
-        if self.__daily_note_format_cache is not None:
-            return self.__daily_note_format_cache
+        if self._daily_note_format is not None:
+            return self._daily_note_format
 
         from datetime import datetime
 
@@ -462,18 +414,7 @@ class RoamAPI:
         for fmt in formats_to_try:
             try:
                 if fmt in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
-                    # Handle ordinal suffixes
-                    day = today.day
-                    if day in [1, 21, 31]:
-                        suffix = "st"
-                    elif day in [2, 22]:
-                        suffix = "nd"
-                    elif day in [3, 23]:
-                        suffix = "rd"
-                    else:
-                        suffix = "th"
-
-                    date_str = today.strftime(f"%B %d{suffix}, %Y")
+                    date_str = today.strftime(f"%B %d{ordinal_suffix(today.day)}, %Y")
                 else:
                     date_str = today.strftime(fmt)
 
@@ -486,21 +427,18 @@ class RoamAPI:
                 query = f'[:find ?e :where [?e :node/title "{sanitized_date}"]]'
                 results = self.run_query(query)
 
-                if results and len(results) > 0:
+                if results:
                     logger.info(f"Found daily note with format: {fmt} -> {date_str}")
-                    # Cache the detected format
-                    self.__daily_note_format_cache = fmt
+                    self._daily_note_format = fmt
                     return fmt
 
             except Exception as e:
                 logger.debug(f"Format {fmt} failed: {e}")
                 continue
 
-        # If no format worked, use default and cache it
         logger.warning("No daily note format found, using default")
-        default_format = "%m-%d-%Y"
-        self.__daily_note_format_cache = default_format
-        return default_format
+        self._daily_note_format = "%m-%d-%Y"
+        return self._daily_note_format
     
     def get_daily_notes_context(self, days: int = 10, max_references: int = 10) -> str:
         """
@@ -527,20 +465,9 @@ class RoamAPI:
         # Get the last N days
         for i in range(days):
             date = datetime.now() - timedelta(days=i)
-            
-            # Handle ordinal suffixes for formats that need them
+
             if date_format in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
-                day = date.day
-                if day in [1, 21, 31]:
-                    suffix = "st"
-                elif day in [2, 22]:
-                    suffix = "nd" 
-                elif day in [3, 23]:
-                    suffix = "rd"
-                else:
-                    suffix = "th"
-                
-                date_str = date.strftime(f"%B %d{suffix}, %Y")
+                date_str = date.strftime(f"%B %d{ordinal_suffix(date.day)}, %Y")
             else:
                 date_str = date.strftime(date_format)
             
@@ -583,7 +510,7 @@ class RoamAPI:
         else:
             return "# Daily Notes Context\n\nNo daily notes found for the specified time range."
     
-    def process_blocks(self, blocks: List[Dict[str, Any]], depth: int = 0,
+    def process_blocks(self, blocks: list[dict[str, Any]], depth: int = 0,
                       extract_links: bool = False, linked_pages: Optional[set] = None) -> str:
         """
         Recursively process blocks and convert them to markdown.
