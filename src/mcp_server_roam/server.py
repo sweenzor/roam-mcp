@@ -7,6 +7,8 @@ from pydantic import BaseModel
 
 # Import our Roam API client and custom exceptions
 from mcp_server_roam.roam_api import (
+    ORDINAL_DATE_FORMATS,
+    InvalidQueryError,
     PageNotFoundError,
     RoamAPI,
     RoamAPIError,
@@ -111,8 +113,10 @@ def roam_create_block(
 
         # If title is provided, look up the page UID
         if title and not page_uid:
+            # Sanitize title to prevent query injection
+            sanitized_title = RoamAPI._sanitize_query_input(title)
             query = (
-                f'[:find ?uid :where [?e :node/title "{title}"] '
+                f'[:find ?uid :where [?e :node/title "{sanitized_title}"] '
                 '[?e :block/uid ?uid]]'
             )
             results = roam.run_query(query)
@@ -124,6 +128,8 @@ def roam_create_block(
         block_uid = result.get("uid", "unknown")
         return f"Created block {block_uid} with content: {content}"
 
+    except InvalidQueryError as e:
+        return f"Error: Invalid input - {e}"
     except RoamAPIError as e:
         return f"Error creating block: {e}"
 
@@ -177,13 +183,10 @@ def roam_debug_daily_notes() -> str:
         debug_info.append(f"**Detected format**: `{detected_format}`\n")
 
         # Test the last 3 days with the detected format
-        ordinal_formats = [
-            "%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"
-        ]
         for i in range(3):
             date = datetime.now() - timedelta(days=i)
 
-            if detected_format in ordinal_formats:
+            if detected_format in ORDINAL_DATE_FORMATS:
                 date_str = date.strftime(f"%B %d{ordinal_suffix(date.day)}, %Y")
             else:
                 date_str = date.strftime(detected_format)
