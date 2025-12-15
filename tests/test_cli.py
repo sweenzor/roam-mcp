@@ -3,7 +3,7 @@ import contextlib
 import logging
 import runpy
 import sys
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 from click.testing import CliRunner
 
@@ -16,8 +16,11 @@ class TestMainFunction:
     def test_main_default_logging(self) -> None:
         """Test main function with default (no verbose) logging level."""
         runner = CliRunner()
+        mock_coro = MagicMock()
+        mock_serve = MagicMock(return_value=mock_coro)
 
         with (
+            patch("mcp_server_roam.serve", new=mock_serve),
             patch("asyncio.run") as mock_run,
             patch.object(logging, "basicConfig") as mock_basic_config,
         ):
@@ -27,13 +30,14 @@ class TestMainFunction:
             mock_basic_config.assert_called_once()
             call_kwargs = mock_basic_config.call_args[1]
             assert call_kwargs["level"] == logging.WARN
-            mock_run.assert_called_once()
+            mock_run.assert_called_once_with(mock_coro)
 
     def test_main_verbose_once(self) -> None:
         """Test main function with -v (INFO level)."""
         runner = CliRunner()
 
         with (
+            patch("mcp_server_roam.serve", new=MagicMock()),
             patch("asyncio.run"),
             patch.object(logging, "basicConfig") as mock_basic_config,
         ):
@@ -48,6 +52,7 @@ class TestMainFunction:
         runner = CliRunner()
 
         with (
+            patch("mcp_server_roam.serve", new=MagicMock()),
             patch("asyncio.run"),
             patch.object(logging, "basicConfig") as mock_basic_config,
         ):
@@ -62,6 +67,7 @@ class TestMainFunction:
         runner = CliRunner()
 
         with (
+            patch("mcp_server_roam.serve", new=MagicMock()),
             patch("asyncio.run"),
             patch.object(logging, "basicConfig") as mock_basic_config,
         ):
@@ -75,11 +81,17 @@ class TestMainFunction:
     def test_main_calls_serve(self) -> None:
         """Test that main calls serve via asyncio.run."""
         runner = CliRunner()
+        mock_coro = MagicMock()
+        mock_serve = MagicMock(return_value=mock_coro)
 
-        with patch("asyncio.run") as mock_run, patch.object(logging, "basicConfig"):
+        with (
+            patch("mcp_server_roam.serve", new=mock_serve),
+            patch("asyncio.run") as mock_run,
+            patch.object(logging, "basicConfig"),
+        ):
             result = runner.invoke(main)
 
-            mock_run.assert_called_once()
+            mock_run.assert_called_once_with(mock_coro)
             # Verify exit code is 0
             assert result.exit_code == 0
 
@@ -88,6 +100,7 @@ class TestMainFunction:
         runner = CliRunner()
 
         with (
+            patch("mcp_server_roam.serve", new=MagicMock()),
             patch("asyncio.run"),
             patch.object(logging, "basicConfig") as mock_basic_config,
         ):
@@ -102,6 +115,7 @@ class TestMainFunction:
         runner = CliRunner()
 
         with (
+            patch("mcp_server_roam.serve", new=MagicMock()),
             patch("asyncio.run"),
             patch.object(logging, "basicConfig") as mock_basic_config,
         ):
@@ -127,7 +141,11 @@ class TestModuleMain:
         # We test this by ensuring the main function can be called directly
         runner = CliRunner()
 
-        with patch("asyncio.run"), patch.object(logging, "basicConfig"):
+        with (
+            patch("mcp_server_roam.serve", new=MagicMock()),
+            patch("asyncio.run"),
+            patch.object(logging, "basicConfig"),
+        ):
             # Simulate running as __main__
             result = runner.invoke(main)
             assert result.exit_code == 0

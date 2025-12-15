@@ -242,27 +242,27 @@ async def list_tools() -> list[Tool]:
         Tool(
             name="roam_hello_world",
             description="Simple hello world greeting from Roam MCP server",
-            inputSchema=RoamHelloWorld.schema(),
+            inputSchema=RoamHelloWorld.model_json_schema(),
         ),
         Tool(
             name="roam_get_page_markdown",
             description="Retrieve a page's content in clean markdown format",
-            inputSchema=RoamGetPageMarkdown.schema(),
+            inputSchema=RoamGetPageMarkdown.model_json_schema(),
         ),
         Tool(
             name="roam_create_block",
             description="Add a new block to a Roam page",
-            inputSchema=RoamCreateBlock.schema(),
+            inputSchema=RoamCreateBlock.model_json_schema(),
         ),
         Tool(
             name="roam_context",
             description="Get daily notes with their linked references for context",
-            inputSchema=RoamContext.schema(),
+            inputSchema=RoamContext.model_json_schema(),
         ),
         Tool(
             name="roam_debug_daily_notes",
             description="Debug daily note formats and show what daily notes exist",
-            inputSchema=RoamDebugDailyNotes.schema(),
+            inputSchema=RoamDebugDailyNotes.model_json_schema(),
         ),
     ]
 

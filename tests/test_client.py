@@ -14,8 +14,8 @@ from mcp.client.stdio import stdio_client
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
 
 
-async def test_server() -> None:
-    """Test the server by calling various tools."""
+async def run_client_demo() -> None:
+    """Demo the server by calling various tools."""
     server_params = StdioServerParameters(
         command="python",
         args=["-m", "mcp_server_roam"],
@@ -73,4 +73,4 @@ async def test_server() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(test_server())
+    asyncio.run(run_client_demo())
