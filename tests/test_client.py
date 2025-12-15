@@ -11,7 +11,7 @@ from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
 
 # Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
+sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "..")))
 
 
 async def run_client_demo() -> None:
@@ -40,9 +40,7 @@ async def run_client_demo() -> None:
             # Call the hello_world tool
             print("\nTesting roam_hello_world tool:")
             try:
-                result = await session.call_tool(
-                    "roam_hello_world", {"name": "Tester"}
-                )
+                result = await session.call_tool("roam_hello_world", {"name": "Tester"})
                 print(f"Response: {result}")
             except Exception as e:
                 print(f"Error calling roam_hello_world: {e}")
@@ -60,10 +58,10 @@ async def run_client_demo() -> None:
             # Call the create_block tool
             print("\nTesting roam_create_block tool:")
             try:
-                result = await session.call_tool("roam_create_block", {
-                    "content": "This is a test block",
-                    "title": "Test Page"
-                })
+                result = await session.call_tool(
+                    "roam_create_block",
+                    {"content": "This is a test block", "title": "Test Page"},
+                )
                 print(f"Response: {result}")
             except Exception as e:
                 print(f"Error calling roam_create_block: {e}")

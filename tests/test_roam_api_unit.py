@@ -1,4 +1,5 @@
 """Comprehensive unit tests for roam_api.py module."""
+
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -145,9 +146,7 @@ class TestRetryWithBackoff:
         """Test that non-retryable exceptions are raised immediately."""
         call_count = 0
 
-        @retry_with_backoff(
-            max_retries=3, retryable_exceptions=(ConnectionError,)
-        )
+        @retry_with_backoff(max_retries=3, retryable_exceptions=(ConnectionError,))
         def raises_value_error() -> str:
             nonlocal call_count
             call_count += 1

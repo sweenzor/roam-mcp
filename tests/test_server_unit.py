@@ -3,6 +3,7 @@
 These tests use pytest-mock to mock external dependencies (RoamAPI) and ensure
 fast, isolated testing without requiring actual Roam API access.
 """
+
 from typing import Any
 
 import pytest
@@ -179,9 +180,7 @@ class TestRoamGetPageMarkdown:
 
         assert result == "# Empty Page\n\n"
 
-    def test_get_page_markdown_no_children_key(
-        self, mocker: MockerFixture
-    ) -> None:
+    def test_get_page_markdown_no_children_key(self, mocker: MockerFixture) -> None:
         """Test getting page markdown when :block/children key is missing."""
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.return_value = {
@@ -201,9 +200,7 @@ class TestRoamGetPageMarkdown:
 class TestRoamGetPageMarkdownErrors:
     """Tests for error handling in roam_get_page_markdown."""
 
-    def test_get_page_markdown_page_not_found(
-        self, mocker: MockerFixture
-    ) -> None:
+    def test_get_page_markdown_page_not_found(self, mocker: MockerFixture) -> None:
         """Test error handling when page is not found."""
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.side_effect = PageNotFoundError(
@@ -221,9 +218,7 @@ class TestRoamGetPageMarkdownErrors:
     def test_get_page_markdown_api_error(self, mocker: MockerFixture) -> None:
         """Test error handling when API raises a general exception."""
         mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.get_page.side_effect = RoamAPIError(
-            "API connection failed"
-        )
+        mock_roam_instance.get_page.side_effect = RoamAPIError("API connection failed")
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
@@ -256,7 +251,7 @@ class TestRoamGetPageMarkdownErrors:
             ROAM_CLIENT_PATH,
             side_effect=RoamAPIError(
                 "Failed to initialize RoamAPI client: Roam API token not provided"
-            )
+            ),
         )
 
         result = roam_get_page_markdown("Test Page")
@@ -555,9 +550,7 @@ class TestRoamDebugDailyNotes:
         assert "Daily Notes Debug" in result
         assert "API Error" in result
 
-    def test_debug_daily_notes_api_error_in_format(
-        self, mocker: MockerFixture
-    ) -> None:
+    def test_debug_daily_notes_api_error_in_format(self, mocker: MockerFixture) -> None:
         """Test when find_daily_note_format raises API error."""
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.find_daily_note_format.side_effect = RoamAPIError(
@@ -701,9 +694,7 @@ class TestServe:
         )
         mock_stdio.__aexit__ = mocker.AsyncMock(return_value=None)
 
-        mocker.patch(
-            "mcp_server_roam.server.stdio_server", return_value=mock_stdio
-        )
+        mocker.patch("mcp_server_roam.server.stdio_server", return_value=mock_stdio)
 
         # Mock server.run to avoid actually running
         mock_run = mocker.patch.object(server, "run", new_callable=mocker.AsyncMock)

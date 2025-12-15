@@ -1,4 +1,5 @@
 """Unit tests for Roam MCP server tools."""
+
 from unittest.mock import MagicMock, patch
 
 from mcp_server_roam.server import (
@@ -19,7 +20,7 @@ def test_roam_hello_world() -> None:
     assert "Hello, Roam!" in result
 
 
-@patch('mcp_server_roam.server.get_roam_client')
+@patch("mcp_server_roam.server.get_roam_client")
 def test_roam_get_page_markdown(mock_get_client: MagicMock) -> None:
     """Test get_page_markdown tool with mocked API."""
     # Mock the RoamAPI instance and its methods
@@ -28,7 +29,7 @@ def test_roam_get_page_markdown(mock_get_client: MagicMock) -> None:
     mock_instance.get_page.return_value = {
         ":block/children": [
             {":block/string": "This is a mock implementation"},
-            {":block/string": "Another test block"}
+            {":block/string": "Another test block"},
         ]
     }
     # Mock the process_blocks method to return formatted markdown
@@ -43,7 +44,7 @@ def test_roam_get_page_markdown(mock_get_client: MagicMock) -> None:
     mock_instance.process_blocks.assert_called_once()
 
 
-@patch('mcp_server_roam.server.get_roam_client')
+@patch("mcp_server_roam.server.get_roam_client")
 def test_roam_create_block(mock_get_client: MagicMock) -> None:
     """Test create_block tool with mocked API."""
     mock_instance = MagicMock()
