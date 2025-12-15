@@ -1,9 +1,7 @@
 """Comprehensive unit tests for roam_api.py module."""
-import time
 from unittest.mock import MagicMock, patch
 
 import pytest
-import requests
 
 from mcp_server_roam.roam_api import (
     AuthenticationError,

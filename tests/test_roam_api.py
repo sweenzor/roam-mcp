@@ -3,19 +3,13 @@
 
 This script tests the RoamAPI class that's modeled after the Python SDK.
 """
-import asyncio
 import json
 import logging
-import os
-import sys
 from typing import Any
 
 from dotenv import load_dotenv
 
-# Add the project root to the Python path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), '..')))
-
-from src.mcp_server_roam.roam_api import RoamAPI
+from mcp_server_roam.roam_api import RoamAPI
 
 # Set up logging
 logging.basicConfig(level=logging.INFO)
@@ -26,11 +20,15 @@ load_dotenv()
 
 
 def print_formatted_json(data: Any) -> None:
-    """Print JSON data in a readable format."""
+    """Print JSON data in a readable format.
+
+    Args:
+        data: The data to print as formatted JSON.
+    """
     print(json.dumps(data, indent=2))
 
 
-async def main() -> None:
+def main() -> None:
     """Run the test script."""
     try:
         # Initialize the Roam API client
@@ -94,4 +92,4 @@ async def main() -> None:
 
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    main()
