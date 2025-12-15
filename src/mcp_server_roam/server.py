@@ -1,4 +1,5 @@
 """MCP server implementation for Roam Research API."""
+
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -138,7 +139,7 @@ def roam_create_block(
             sanitized_title = RoamAPI._sanitize_query_input(title)
             query = (
                 f'[:find ?uid :where [?e :node/title "{sanitized_title}"] '
-                '[?e :block/uid ?uid]]'
+                "[?e :block/uid ?uid]]"
             )
             results = roam.run_query(query)
             if not results:
@@ -214,7 +215,7 @@ def roam_debug_daily_notes() -> str:
             try:
                 # Try to get the page
                 page_data = roam.get_page(date_str)
-                children_count = len(page_data.get(':block/children', []))
+                children_count = len(page_data.get(":block/children", []))
                 debug_info.append(f"✅ **{date_str}**: Found ({children_count})")
             except PageNotFoundError:
                 debug_info.append(f"❌ **{date_str}**: Not found")
@@ -288,14 +289,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = roam_get_page_markdown(arguments["title"])
         case "roam_create_block":
             result = roam_create_block(
-                arguments["content"],
-                arguments.get("page_uid"),
-                arguments.get("title")
+                arguments["content"], arguments.get("page_uid"), arguments.get("title")
             )
         case "roam_context":
             result = roam_context(
-                arguments.get("days", 10),
-                arguments.get("max_references", 10)
+                arguments.get("days", 10), arguments.get("max_references", 10)
             )
         case "roam_debug_daily_notes":
             result = roam_debug_daily_notes()

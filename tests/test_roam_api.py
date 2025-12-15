@@ -38,7 +38,7 @@ def main() -> None:
         print("\n2. Running a simple Datalog query to list pages...")
         try:
             # Use a simpler query format
-            query = '[:find ?title :where [?e :node/title ?title]]'
+            query = "[:find ?title :where [?e :node/title ?title]]"
             results = roam.run_query(query)
 
             print("Pages in the graph:")
@@ -58,18 +58,18 @@ def main() -> None:
 
                         # Look for blocks on this page
                         print("\n4. Looking for blocks on this page...")
-                        if 'children' in page_data and page_data['children']:
-                            count = len(page_data['children'])
+                        if "children" in page_data and page_data["children"]:
+                            count = len(page_data["children"])
                             print(f"Found {count} blocks on page '{first_page}'")
 
                             # Display the first block
-                            first_block = page_data['children'][0]
+                            first_block = page_data["children"][0]
                             print("\nFirst block:")
                             print_formatted_json(first_block)
 
                             # Get the block UID if available
-                            if 'uid' in first_block:
-                                block_uid = first_block['uid']
+                            if "uid" in first_block:
+                                block_uid = first_block["uid"]
                                 print(f"\n5. Getting block: UID '{block_uid}'...")
 
                                 try:

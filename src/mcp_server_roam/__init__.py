@@ -1,4 +1,5 @@
 """MCP server for Roam Research API integration."""
+
 import logging
 import sys
 
@@ -16,15 +17,15 @@ from .roam_api import (
 from .server import serve
 
 __all__ = [
-    'main',
-    'serve',
-    'RoamAPI',
-    'RoamAPIError',
-    'PageNotFoundError',
-    'BlockNotFoundError',
-    'AuthenticationError',
-    'RateLimitError',
-    'InvalidQueryError'
+    "main",
+    "serve",
+    "RoamAPI",
+    "RoamAPIError",
+    "PageNotFoundError",
+    "BlockNotFoundError",
+    "AuthenticationError",
+    "RateLimitError",
+    "InvalidQueryError",
 ]
 
 

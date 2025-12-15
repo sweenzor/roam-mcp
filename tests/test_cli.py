@@ -1,4 +1,5 @@
 """Tests for CLI entry points and main function."""
+
 import contextlib
 import logging
 import runpy

@@ -1,4 +1,5 @@
 """Interface to the Roam Research API."""
+
 import functools
 import logging
 import os
@@ -83,6 +84,7 @@ def retry_with_backoff(
     Returns:
         Decorated function with retry logic.
     """
+
     def decorator(func: Callable[..., T]) -> Callable[..., T]:
         @functools.wraps(func)
         def wrapper(*args: Any, **kwargs: Any) -> T:
@@ -118,6 +120,7 @@ def retry_with_backoff(
             raise RuntimeError("Retry logic failed unexpectedly")  # pragma: no cover
 
         return wrapper
+
     return decorator
 
 
@@ -204,15 +207,15 @@ class RoamAPI:
             raise InvalidQueryError(msg)
 
         # Check for null bytes and other control characters that could cause issues
-        if '\x00' in value:
+        if "\x00" in value:
             raise InvalidQueryError("Input contains null bytes")
 
         # Check for suspicious patterns that might indicate query injection attempts.
         # These patterns are unusual in normal page titles/UIDs.
         suspicious_patterns = [
-            r'\[:find',   # Datalog find clause
-            r'\[:where',  # Datalog where clause
-            r'\[\?[a-z]',  # Logic variables (e.g., [?e, [?b)
+            r"\[:find",  # Datalog find clause
+            r"\[:where",  # Datalog where clause
+            r"\[\?[a-z]",  # Logic variables (e.g., [?e, [?b)
         ]
 
         for pattern in suspicious_patterns:
@@ -399,7 +402,7 @@ class RoamAPI:
 
         resp = self.call(path, body)
         result = resp.json()
-        return result.get('result', [])
+        return result.get("result", [])
 
     def pull(self, eid: str, pattern: str = "[*]") -> dict[str, Any]:
         """Get an entity by its ID using a pull pattern.
@@ -461,10 +464,7 @@ class RoamAPI:
 
             for result in results[:max_results]:  # Limit results
                 block_uid, block_string = result
-                references.append({
-                    'uid': block_uid,
-                    'string': block_string
-                })
+                references.append({"uid": block_uid, "string": block_string})
 
             return references
         except (AuthenticationError, InvalidQueryError):
@@ -562,6 +562,7 @@ class RoamAPI:
         if not page_uid and not parent_uid:
             # Default to today's Daily Notes
             from datetime import datetime
+
             today = datetime.now().strftime(DEFAULT_DATE_FORMAT)
 
             # Sanitize date string to prevent query injection
@@ -577,7 +578,7 @@ class RoamAPI:
             # Get the UID
             daily_page_query = (
                 f'[:find ?uid :where [?e :node/title "{sanitized_today}"] '
-                '[?e :block/uid ?uid]]'
+                "[?e :block/uid ?uid]]"
             )
             uid_results = self.run_query(daily_page_query)
 
@@ -767,7 +768,7 @@ class RoamAPI:
 
             # Extract linked pages from [[Page Name]] syntax if requested
             if extract_links and linked_pages is not None:
-                page_links = re.findall(r'\[\[([^\]]+)\]\]', block_string)
+                page_links = re.findall(r"\[\[([^\]]+)\]\]", block_string)
                 for page_link in page_links:
                     linked_pages.add(page_link)
 
@@ -780,7 +781,7 @@ class RoamAPI:
                     block[":block/children"],
                     depth + 1,
                     extract_links=extract_links,
-                    linked_pages=linked_pages
+                    linked_pages=linked_pages,
                 )
 
         return result
