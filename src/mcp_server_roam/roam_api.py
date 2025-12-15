@@ -1,13 +1,118 @@
 """Interface to the Roam Research API."""
+import functools
 import logging
 import os
 import re
-from typing import Any
+import time
+from collections.abc import Callable
+from typing import Any, TypeVar
 
 import requests
 from dotenv import load_dotenv
 
 logger = logging.getLogger(__name__)
+
+# Type variable for generic retry decorator
+T = TypeVar("T")
+
+# Retry configuration constants
+MAX_RETRIES = 3
+INITIAL_BACKOFF_SECONDS = 1.0
+BACKOFF_MULTIPLIER = 2.0
+MAX_BACKOFF_SECONDS = 16.0
+
+# API configuration constants
+DEFAULT_MAX_REFERENCES = 20
+REQUEST_TIMEOUT_SECONDS = 30
+
+# Date format constants for daily notes
+# These are the common formats used by Roam Research for daily note page titles
+DATE_FORMAT_LONG_ORDINAL = "%B %dth, %Y"  # "June 13th, 2025" (with ordinal)
+DATE_FORMAT_LONG = "%B %d, %Y"  # "June 13, 2025"
+DATE_FORMAT_US_DASH = "%m-%d-%Y"  # "06-13-2025"
+DATE_FORMAT_ISO = "%Y-%m-%d"  # "2025-06-13"
+DATE_FORMAT_EU_DASH = "%d-%m-%Y"  # "13-06-2025"
+DATE_FORMAT_US_SLASH = "%m/%d/%Y"  # "06/13/2025"
+DATE_FORMAT_ISO_SLASH = "%Y/%m/%d"  # "2025/06/13"
+DATE_FORMAT_EU_SLASH = "%d/%m/%Y"  # "13/06/2025"
+
+# Ordinal format variations (1st, 2nd, 3rd, 4th suffixes)
+ORDINAL_DATE_FORMATS = (
+    "%B %dth, %Y",
+    "%B %dst, %Y",
+    "%B %dnd, %Y",
+    "%B %drd, %Y",
+)
+
+# All supported daily note formats to try during auto-detection
+DAILY_NOTE_FORMATS = (
+    DATE_FORMAT_LONG,  # "June 13, 2025"
+    *ORDINAL_DATE_FORMATS,  # "June 13th, 2025" variants
+    DATE_FORMAT_US_DASH,  # "06-13-2025"
+    DATE_FORMAT_ISO,  # "2025-06-13"
+    DATE_FORMAT_EU_DASH,  # "13-06-2025"
+    DATE_FORMAT_US_SLASH,  # "06/13/2025"
+    DATE_FORMAT_ISO_SLASH,  # "2025/06/13"
+    DATE_FORMAT_EU_SLASH,  # "13/06/2025"
+)
+
+# Default date format when auto-detection fails
+DEFAULT_DATE_FORMAT = DATE_FORMAT_US_DASH
+
+
+def retry_with_backoff(
+    max_retries: int = MAX_RETRIES,
+    initial_backoff: float = INITIAL_BACKOFF_SECONDS,
+    backoff_multiplier: float = BACKOFF_MULTIPLIER,
+    max_backoff: float = MAX_BACKOFF_SECONDS,
+    retryable_exceptions: tuple[type[Exception], ...] = (
+        requests.exceptions.ConnectionError,
+        requests.exceptions.Timeout,
+    ),
+) -> Callable[[Callable[..., T]], Callable[..., T]]:
+    """Decorator for retrying functions with exponential backoff.
+
+    Args:
+        max_retries: Maximum number of retry attempts.
+        initial_backoff: Initial backoff time in seconds.
+        backoff_multiplier: Multiplier for each subsequent backoff.
+        max_backoff: Maximum backoff time in seconds.
+        retryable_exceptions: Tuple of exception types that trigger a retry.
+
+    Returns:
+        Decorated function with retry logic.
+    """
+    def decorator(func: Callable[..., T]) -> Callable[..., T]:
+        @functools.wraps(func)
+        def wrapper(*args: Any, **kwargs: Any) -> T:
+            last_exception: Exception | None = None
+            backoff = initial_backoff
+
+            for attempt in range(max_retries + 1):
+                try:
+                    return func(*args, **kwargs)
+                except retryable_exceptions as e:
+                    last_exception = e
+                    if attempt < max_retries:
+                        logger.warning(
+                            f"Attempt {attempt + 1}/{max_retries + 1} failed: {e}. "
+                            f"Retrying in {backoff:.1f}s..."
+                        )
+                        time.sleep(backoff)
+                        backoff = min(backoff * backoff_multiplier, max_backoff)
+                    else:
+                        logger.error(
+                            f"All {max_retries + 1} attempts failed. Last error: {e}"
+                        )
+
+            # If we get here, all retries failed
+            if last_exception:
+                raise last_exception
+            # This should never happen, but satisfies type checker
+            raise RuntimeError("Retry logic failed unexpectedly")
+
+        return wrapper
+    return decorator
 
 
 def ordinal_suffix(day: int) -> str:
@@ -120,18 +225,21 @@ class RoamAPI:
         Raises:
             AuthenticationError: If API token or graph name is not provided.
         """
-        self.api_token = api_token or os.getenv("ROAM_API_TOKEN")
-        self.graph_name = graph_name or os.getenv("ROAM_GRAPH_NAME")
+        resolved_token = api_token or os.getenv("ROAM_API_TOKEN")
+        resolved_graph = graph_name or os.getenv("ROAM_GRAPH_NAME")
 
-        if not self.api_token:
+        if not resolved_token:
             raise AuthenticationError(
                 "Roam API token not provided and ROAM_API_TOKEN env var not set"
             )
-        if not self.graph_name:
+        if not resolved_graph:
             raise AuthenticationError(
                 "Roam graph name not provided and ROAM_GRAPH_NAME env var not set"
             )
 
+        # These are guaranteed non-None after validation above
+        self.api_token: str = resolved_token
+        self.graph_name: str = resolved_graph
         self._redirect_cache: dict[str, str] = {}
         self._daily_note_format: str | None = None
         logger.info(f"Initialized RoamAPI client for graph: {self.graph_name}")
@@ -141,6 +249,41 @@ class RoamAPI:
         if len(token) > 8:
             return f"{token[:4]}...{token[-4:]}"
         return "***"
+
+    @retry_with_backoff(
+        retryable_exceptions=(
+            requests.exceptions.ConnectionError,
+            requests.exceptions.Timeout,
+            requests.exceptions.ChunkedEncodingError,
+        )
+    )
+    def _make_request(
+        self, url: str, headers: dict[str, str], body: dict[str, Any]
+    ) -> requests.Response:
+        """Make an HTTP POST request with retry logic.
+
+        This is an internal method that handles the actual HTTP call with
+        automatic retries for transient network errors.
+
+        Args:
+            url: Full URL to request.
+            headers: HTTP headers.
+            body: JSON body to send.
+
+        Returns:
+            Response object.
+
+        Raises:
+            requests.exceptions.ConnectionError: After all retries exhausted.
+            requests.exceptions.Timeout: After all retries exhausted.
+        """
+        return requests.post(
+            url,
+            headers=headers,
+            json=body,
+            allow_redirects=False,
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
 
     def call(self, path: str, body: dict[str, Any]) -> requests.Response:
         """Make an API call to Roam, following redirects if necessary.
@@ -159,7 +302,9 @@ class RoamAPI:
             RateLimitError: If rate limit is exceeded (HTTP 429).
             RoamAPIError: For other API errors (HTTP 400, 500, etc).
         """
-        base_url = self._redirect_cache.get(self.graph_name, "https://api.roamresearch.com")
+        base_url = self._redirect_cache.get(
+            self.graph_name, "https://api.roamresearch.com"
+        )
         url = base_url + path
         headers = {
             "Content-Type": "application/json; charset=utf-8",
@@ -171,7 +316,7 @@ class RoamAPI:
         masked_token = self._mask_token(self.api_token)
         logger.info(f"Request headers: Authorization: Bearer {masked_token}")
 
-        resp = requests.post(url, headers=headers, json=body, allow_redirects=False)
+        resp = self._make_request(url, headers, body)
 
         # Handle redirects manually to cache the new URL
         if resp.is_redirect or resp.status_code == 307:
@@ -197,9 +342,9 @@ class RoamAPI:
             logger.error(f"Error response status: {resp.status_code}")
             logger.error(f"Error response body: {resp.text}")
             if resp.status_code == 500:
-                raise RoamAPIError(f'Server error (HTTP 500): {str(resp.text)}')
+                raise RoamAPIError(f"Server error (HTTP 500): {resp.text!s}")
             elif resp.status_code == 400:
-                raise InvalidQueryError(f'Bad request (HTTP 400): {str(resp.text)}')
+                raise InvalidQueryError(f"Bad request (HTTP 400): {resp.text!s}")
             elif resp.status_code == 401:
                 raise AuthenticationError(
                     "Authentication error (HTTP 401): Invalid token"
@@ -230,7 +375,7 @@ class RoamAPI:
             RoamAPIError: If the API request fails.
         """
         path = f"/api/graph/{self.graph_name}/q"
-        body = {"query": query}
+        body: dict[str, Any] = {"query": query}
         if args is not None:
             body["args"] = args
 
@@ -246,7 +391,7 @@ class RoamAPI:
         return resp.json().get("result", {})
 
     def get_references_to_page(
-        self, page_title: str, max_results: int = 20
+        self, page_title: str, max_results: int = DEFAULT_MAX_REFERENCES
     ) -> list[dict[str, Any]]:
         """Get blocks that reference a specific page (backlinks).
 
@@ -256,12 +401,18 @@ class RoamAPI:
 
         Returns:
             List of blocks that contain references to the page.
-            Returns empty list if an error occurs during retrieval.
+            Returns empty list if page has no references or a recoverable error
+            occurs during retrieval.
+
+        Raises:
+            AuthenticationError: If authentication fails (critical error).
+            InvalidQueryError: If input contains invalid patterns.
 
         Note:
-            This method catches and logs RoamAPIError errors, returning an empty
-            list rather than propagating the exception. This is useful for
-            non-critical operations where missing references shouldn't halt.
+            This method catches and logs recoverable RoamAPIError errors
+            (like rate limits or server errors), returning an empty list rather
+            than propagating the exception. Critical errors like authentication
+            failures are still raised.
         """
         # Sanitize input to prevent query injection
         sanitized_title = self._sanitize_query_input(page_title)
@@ -287,8 +438,18 @@ class RoamAPI:
                 })
 
             return references
+        except (AuthenticationError, InvalidQueryError):
+            # Re-raise critical errors that shouldn't be silently ignored
+            raise
+        except RateLimitError as e:
+            # Rate limit is recoverable but should be logged as warning
+            logger.warning(
+                f"Rate limit hit while finding references to {page_title}: {e}"
+            )
+            return []
         except RoamAPIError as e:
-            logger.error(f"Error finding references to {page_title}: {e}")
+            # Other API errors are logged as warnings and return empty list
+            logger.warning(f"Error finding references to {page_title}: {e}")
             return []
 
     def get_block(self, block_uid: str) -> dict[str, Any]:
@@ -372,7 +533,7 @@ class RoamAPI:
         if not page_uid and not parent_uid:
             # Default to today's Daily Notes
             from datetime import datetime
-            today = datetime.now().strftime("%m-%d-%Y")
+            today = datetime.now().strftime(DEFAULT_DATE_FORMAT)
 
             # Sanitize date string to prevent query injection
             sanitized_today = self._sanitize_query_input(today)
@@ -412,6 +573,9 @@ class RoamAPI:
 
         Returns:
             The date format string that works for today's daily note.
+
+        Raises:
+            AuthenticationError: If authentication fails during detection.
         """
         if self._daily_note_format is not None:
             return self._daily_note_format
@@ -419,24 +583,10 @@ class RoamAPI:
         from datetime import datetime
 
         today = datetime.now()
-        # Common Roam daily note formats
-        formats_to_try = [
-            "%B %d, %Y",     # "June 13, 2025"
-            "%B %dth, %Y",   # "June 13th, 2025"
-            "%B %dst, %Y",   # "June 1st, 2025"
-            "%B %dnd, %Y",   # "June 2nd, 2025"
-            "%B %drd, %Y",   # "June 3rd, 2025"
-            "%m-%d-%Y",      # "06-13-2025"
-            "%Y-%m-%d",      # "2025-06-13"
-            "%d-%m-%Y",      # "13-06-2025"
-            "%m/%d/%Y",      # "06/13/2025"
-            "%Y/%m/%d",      # "2025/06/13"
-            "%d/%m/%Y",      # "13/06/2025"
-        ]
 
-        for fmt in formats_to_try:
+        for fmt in DAILY_NOTE_FORMATS:
             try:
-                if fmt in ["%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"]:
+                if fmt in ORDINAL_DATE_FORMATS:
                     date_str = today.strftime(f"%B %d{ordinal_suffix(today.day)}, %Y")
                 else:
                     date_str = today.strftime(fmt)
@@ -455,12 +605,16 @@ class RoamAPI:
                     self._daily_note_format = fmt
                     return fmt
 
-            except Exception as e:
+            except AuthenticationError:
+                # Re-raise authentication errors - these are critical
+                raise
+            except (RoamAPIError, InvalidQueryError, ValueError, KeyError) as e:
+                # Log specific expected errors during format detection
                 logger.debug(f"Format {fmt} failed: {e}")
                 continue
 
         logger.warning("No daily note format found, using default")
-        self._daily_note_format = "%m-%d-%Y"
+        self._daily_note_format = DEFAULT_DATE_FORMAT
         return self._daily_note_format
 
     def get_daily_notes_context(self, days: int = 10, max_references: int = 10) -> str:
@@ -488,10 +642,7 @@ class RoamAPI:
         for i in range(days):
             date = datetime.now() - timedelta(days=i)
 
-            ordinal_formats = [
-                "%B %dth, %Y", "%B %dst, %Y", "%B %dnd, %Y", "%B %drd, %Y"
-            ]
-            if date_format in ordinal_formats:
+            if date_format in ORDINAL_DATE_FORMATS:
                 date_str = date.strftime(f"%B %d{ordinal_suffix(date.day)}, %Y")
             else:
                 date_str = date.strftime(date_format)

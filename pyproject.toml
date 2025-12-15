@@ -39,6 +39,7 @@ dev-dependencies = [
     "pytest-mock>=3.12.0",
     "pytest-rerunfailures>=14.0",
     "black>=24.1.0",
+    "types-requests>=2.31.0",
 ]
 
 [tool.pytest.ini_options]
@@ -75,6 +76,9 @@ ignore = [
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = [
     "ANN401",  # Allow Any type in tests
+]
+"src/mcp_server_roam/roam_api.py" = [
+    "ANN401",  # Allow Any type in generic wrapper functions
 ]
 
 [tool.ruff.lint.pydocstyle]
