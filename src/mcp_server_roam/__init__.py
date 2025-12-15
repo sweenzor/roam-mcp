@@ -1,33 +1,37 @@
-import click
+"""MCP server for Roam Research API integration."""
 import logging
 import sys
-from .server import serve
+
+import click
+
 from .roam_api import (
+    AuthenticationError,
+    BlockNotFoundError,
+    InvalidQueryError,
+    PageNotFoundError,
+    RateLimitError,
     RoamAPI,
-    RoamAPIException,
-    PageNotFoundException,
-    BlockNotFoundException,
-    AuthenticationException,
-    RateLimitException,
-    InvalidQueryException
+    RoamAPIError,
 )
+from .server import serve
 
 __all__ = [
     'main',
     'serve',
     'RoamAPI',
-    'RoamAPIException',
-    'PageNotFoundException',
-    'BlockNotFoundException',
-    'AuthenticationException',
-    'RateLimitException',
-    'InvalidQueryException'
+    'RoamAPIError',
+    'PageNotFoundError',
+    'BlockNotFoundError',
+    'AuthenticationError',
+    'RateLimitError',
+    'InvalidQueryError'
 ]
+
 
 @click.command()
 @click.option("-v", "--verbose", count=True)
 def main(verbose: bool) -> None:
-    """MCP Roam Server - Roam Research functionality for MCP"""
+    """MCP Roam Server - Roam Research functionality for MCP."""
     import asyncio
 
     logging_level = logging.WARN
@@ -38,6 +42,7 @@ def main(verbose: bool) -> None:
 
     logging.basicConfig(level=logging_level, stream=sys.stderr)
     asyncio.run(serve())
+
 
 if __name__ == "__main__":
     main()

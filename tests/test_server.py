@@ -1,17 +1,27 @@
-from unittest.mock import patch, MagicMock
-from mcp_server_roam.server import roam_hello_world, roam_get_page_markdown, roam_create_block
+"""Unit tests for Roam MCP server tools."""
+from unittest.mock import MagicMock, patch
 
-def test_roam_hello_world():
+from mcp_server_roam.server import (
+    roam_create_block,
+    roam_get_page_markdown,
+    roam_hello_world,
+)
+
+
+def test_roam_hello_world() -> None:
+    """Test hello world tool with default and custom names."""
     # Test with default value
     result = roam_hello_world()
     assert "Hello, World!" in result
-    
+
     # Test with custom name
     result = roam_hello_world("Roam")
     assert "Hello, Roam!" in result
 
+
 @patch('mcp_server_roam.server.get_roam_client')
-def test_roam_get_page_markdown(mock_get_client):
+def test_roam_get_page_markdown(mock_get_client: MagicMock) -> None:
+    """Test get_page_markdown tool with mocked API."""
     # Mock the RoamAPI instance and its methods
     mock_instance = MagicMock()
     mock_get_client.return_value = mock_instance
@@ -22,7 +32,9 @@ def test_roam_get_page_markdown(mock_get_client):
         ]
     }
     # Mock the process_blocks method to return formatted markdown
-    mock_instance.process_blocks.return_value = "- This is a mock implementation\n- Another test block\n"
+    mock_instance.process_blocks.return_value = (
+        "- This is a mock implementation\n- Another test block\n"
+    )
 
     result = roam_get_page_markdown("Test Page")
     assert "Test Page" in result
@@ -30,8 +42,10 @@ def test_roam_get_page_markdown(mock_get_client):
     mock_instance.get_page.assert_called_once_with("Test Page")
     mock_instance.process_blocks.assert_called_once()
 
+
 @patch('mcp_server_roam.server.get_roam_client')
-def test_roam_create_block(mock_get_client):
+def test_roam_create_block(mock_get_client: MagicMock) -> None:
+    """Test create_block tool with mocked API."""
     mock_instance = MagicMock()
     mock_get_client.return_value = mock_instance
     mock_instance.create_block.return_value = {"uid": "mock-block-uid"}

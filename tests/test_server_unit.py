@@ -1,24 +1,29 @@
-"""
-Unit tests for the Roam MCP server with mocked dependencies.
+"""Unit tests for the Roam MCP server with mocked dependencies.
 
 These tests use pytest-mock to mock external dependencies (RoamAPI) and ensure
 fast, isolated testing without requiring actual Roam API access.
 """
+from typing import Any
+
 import pytest
-from mcp_server_roam.server import (
-    roam_hello_world,
-    roam_get_page_markdown,
-)
+from pytest_mock import MockerFixture
+
 from mcp_server_roam.roam_api import (
-    PageNotFoundException,
-    RoamAPIException,
-    AuthenticationException,
+    AuthenticationError,
+    PageNotFoundError,
+    RoamAPIError,
 )
+from mcp_server_roam.server import (
+    roam_get_page_markdown,
+    roam_hello_world,
+)
+
+ROAM_CLIENT_PATH = "mcp_server_roam.server.get_roam_client"
 
 
 # Fixtures for mock data
 @pytest.fixture
-def mock_page_data_simple():
+def mock_page_data_simple() -> dict[str, Any]:
     """Simple page with two top-level blocks."""
     return {
         ":node/title": "Test Page",
@@ -37,7 +42,7 @@ def mock_page_data_simple():
 
 
 @pytest.fixture
-def mock_page_data_nested():
+def mock_page_data_nested() -> dict[str, Any]:
     """Page with nested blocks (3 levels deep)."""
     return {
         ":node/title": "Nested Page",
@@ -72,7 +77,7 @@ def mock_page_data_nested():
 
 
 @pytest.fixture
-def mock_page_data_empty():
+def mock_page_data_empty() -> dict[str, Any]:
     """Page with no children blocks."""
     return {
         ":node/title": "Empty Page",
@@ -85,19 +90,19 @@ def mock_page_data_empty():
 class TestRoamHelloWorld:
     """Tests for the simple hello world function."""
 
-    def test_hello_world_default(self):
+    def test_hello_world_default(self) -> None:
         """Test hello world with default parameter."""
         result = roam_hello_world()
         assert "Hello, World!" in result
         assert "Roam Research MCP server" in result
 
-    def test_hello_world_custom_name(self):
+    def test_hello_world_custom_name(self) -> None:
         """Test hello world with custom name parameter."""
         result = roam_hello_world("Claude")
         assert "Hello, Claude!" in result
         assert "Roam Research MCP server" in result
 
-    def test_hello_world_empty_name(self):
+    def test_hello_world_empty_name(self) -> None:
         """Test hello world with empty string name."""
         result = roam_hello_world("")
         assert "Hello, !" in result
@@ -107,36 +112,43 @@ class TestRoamHelloWorld:
 class TestRoamGetPageMarkdown:
     """Tests for fetching page content as markdown."""
 
-    def test_get_page_markdown_simple(self, mocker, mock_page_data_simple):
+    def test_get_page_markdown_simple(
+        self, mocker: MockerFixture, mock_page_data_simple: dict[str, Any]
+    ) -> None:
         """Test getting page markdown with simple structure."""
-        # Mock get_roam_client to return a mock RoamAPI instance
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.return_value = mock_page_data_simple
-        mock_roam_instance.process_blocks.return_value = "- First block content\n- Second block content\n"
+        mock_roam_instance.process_blocks.return_value = (
+            "- First block content\n- Second block content\n"
+        )
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Test Page")
 
-        # Verify the API was called correctly
         mock_roam_instance.get_page.assert_called_once_with("Test Page")
-
-        # Verify the markdown output
         assert "# Test Page\n\n" in result
         assert "- First block content\n" in result
         assert "- Second block content\n" in result
 
-    def test_get_page_markdown_nested(self, mocker, mock_page_data_nested):
+    def test_get_page_markdown_nested(
+        self, mocker: MockerFixture, mock_page_data_nested: dict[str, Any]
+    ) -> None:
         """Test getting page markdown with nested structure."""
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.return_value = mock_page_data_nested
-        mock_roam_instance.process_blocks.return_value = "- Top level block\n  - Second level block\n    - Third level block\n  - Another second level\n- Another top level\n"
+        mock_roam_instance.process_blocks.return_value = (
+            "- Top level block\n"
+            "  - Second level block\n"
+            "    - Third level block\n"
+            "  - Another second level\n"
+            "- Another top level\n"
+        )
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Nested Page")
 
-        # Verify structure
         assert "# Nested Page\n\n" in result
         assert "- Top level block\n" in result
         assert "  - Second level block\n" in result
@@ -144,20 +156,23 @@ class TestRoamGetPageMarkdown:
         assert "  - Another second level\n" in result
         assert "- Another top level\n" in result
 
-    def test_get_page_markdown_empty(self, mocker, mock_page_data_empty):
+    def test_get_page_markdown_empty(
+        self, mocker: MockerFixture, mock_page_data_empty: dict[str, Any]
+    ) -> None:
         """Test getting page markdown for page with no blocks."""
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.return_value = mock_page_data_empty
         mock_roam_instance.process_blocks.return_value = ""
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Empty Page")
 
-        # Should only have the title, no blocks
         assert result == "# Empty Page\n\n"
 
-    def test_get_page_markdown_no_children_key(self, mocker):
+    def test_get_page_markdown_no_children_key(
+        self, mocker: MockerFixture
+    ) -> None:
         """Test getting page markdown when :block/children key is missing."""
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.return_value = {
@@ -165,13 +180,11 @@ class TestRoamGetPageMarkdown:
             ":block/uid": "no-children-uid",
         }
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("No Children Key")
 
-        # Should only have the title
         assert result == "# No Children Key\n\n"
-        # process_blocks should not be called
         mock_roam_instance.process_blocks.assert_not_called()
 
 
@@ -179,59 +192,66 @@ class TestRoamGetPageMarkdown:
 class TestRoamGetPageMarkdownErrors:
     """Tests for error handling in roam_get_page_markdown."""
 
-    def test_get_page_markdown_page_not_found(self, mocker):
+    def test_get_page_markdown_page_not_found(
+        self, mocker: MockerFixture
+    ) -> None:
         """Test error handling when page is not found."""
         mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.get_page.side_effect = PageNotFoundException(
+        mock_roam_instance.get_page.side_effect = PageNotFoundError(
             "Page with title 'Nonexistent Page' not found"
         )
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Nonexistent Page")
 
-        # Should return an error message, not raise an exception
         assert "Error:" in result
         assert "not found" in result
         mock_roam_instance.get_page.assert_called_once_with("Nonexistent Page")
 
-    def test_get_page_markdown_api_error(self, mocker):
+    def test_get_page_markdown_api_error(self, mocker: MockerFixture) -> None:
         """Test error handling when API raises a general exception."""
         mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.get_page.side_effect = RoamAPIException("API connection failed")
+        mock_roam_instance.get_page.side_effect = RoamAPIError(
+            "API connection failed"
+        )
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Test Page")
 
-        # Should return an error message
         assert "Error fetching page:" in result
         assert "API connection failed" in result
 
-    def test_get_page_markdown_authentication_error(self, mocker):
+    def test_get_page_markdown_authentication_error(
+        self, mocker: MockerFixture
+    ) -> None:
         """Test error handling for authentication errors."""
         mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.get_page.side_effect = AuthenticationException(
+        mock_roam_instance.get_page.side_effect = AuthenticationError(
             "Authentication error (HTTP 401): Invalid token"
         )
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Test Page")
 
         assert "Error fetching page:" in result
         assert "Authentication error" in result
 
-    def test_get_page_markdown_roam_client_init_error(self, mocker):
+    def test_get_page_markdown_roam_client_init_error(
+        self, mocker: MockerFixture
+    ) -> None:
         """Test error handling when RoamAPI initialization fails."""
         mocker.patch(
-            "mcp_server_roam.server.get_roam_client",
-            side_effect=RoamAPIException("Failed to initialize RoamAPI client: Roam API token not provided")
+            ROAM_CLIENT_PATH,
+            side_effect=RoamAPIError(
+                "Failed to initialize RoamAPI client: Roam API token not provided"
+            )
         )
 
         result = roam_get_page_markdown("Test Page")
 
-        # Should catch the initialization error
         assert "Error fetching page:" in result
         assert "Failed to initialize RoamAPI client" in result
 
@@ -240,8 +260,8 @@ class TestRoamGetPageMarkdownErrors:
 class TestRoamGetPageMarkdownIntegration:
     """Integration-style tests for the full markdown conversion flow."""
 
-    def test_real_world_page_structure(self, mocker):
-        """Test with a realistic page structure including references and todos."""
+    def test_real_world_page_structure(self, mocker: MockerFixture) -> None:
+        """Test with a realistic page structure including references."""
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.return_value = {
             ":node/title": "Project Planning",
@@ -274,18 +294,17 @@ class TestRoamGetPageMarkdownIntegration:
             "- Meeting notes from [[June 1st, 2025]]\n"
         )
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Project Planning")
 
-        # Verify the full structure including Roam-specific syntax
         assert "# Project Planning\n\n" in result
         assert "- Project goals\n" in result
         assert "  - TODO Implement feature [[Feature A]]\n" in result
         assert "  - DONE Research options #research\n" in result
         assert "- Meeting notes from [[June 1st, 2025]]\n" in result
 
-    def test_deeply_nested_structure(self, mocker):
+    def test_deeply_nested_structure(self, mocker: MockerFixture) -> None:
         """Test with a deeply nested structure (5+ levels)."""
         mock_roam_instance = mocker.MagicMock()
 
@@ -325,11 +344,10 @@ class TestRoamGetPageMarkdownIntegration:
             "        - Level 5\n"
         )
 
-        mocker.patch("mcp_server_roam.server.get_roam_client", return_value=mock_roam_instance)
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = roam_get_page_markdown("Deep Nesting")
 
-        # Verify indentation at each level
         assert "- Level 1\n" in result
         assert "  - Level 2\n" in result
         assert "    - Level 3\n" in result

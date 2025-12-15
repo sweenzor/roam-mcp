@@ -3,12 +3,17 @@
 These tests require valid Roam API credentials and will be skipped
 automatically if ROAM_API_TOKEN is not set in the environment.
 
-Run with credentials: ROAM_API_TOKEN=xxx ROAM_GRAPH_NAME=xxx uv run pytest tests/test_e2e.py -v
+Run with credentials::
 
-Note: Roam API has a 50 req/min rate limit. Tests are consolidated to minimize API calls.
+    ROAM_API_TOKEN=xxx ROAM_GRAPH_NAME=xxx uv run pytest tests/test_e2e.py -v
+
+Note: Roam API has a 50 req/min rate limit. Tests are consolidated.
 """
 import os
 import re
+from collections.abc import Awaitable, Callable
+from typing import Any
+
 import pytest
 from mcp import ClientSession, StdioServerParameters
 from mcp.client.stdio import stdio_client
@@ -20,24 +25,28 @@ pytestmark = pytest.mark.skipif(
 )
 
 
-async def run_with_session(test_fn):
+async def run_with_session(
+    test_fn: Callable[[ClientSession], Awaitable[Any]]
+) -> Any:
     """Run a test function with an MCP session, handling cleanup properly."""
     server_params = StdioServerParameters(
         command="python",
         args=["-m", "mcp_server_roam"],
     )
-    async with stdio_client(server_params) as (read, write):
-        async with ClientSession(read, write) as session:
-            await session.initialize()
-            return await test_fn(session)
+    async with (
+        stdio_client(server_params) as (read, write),
+        ClientSession(read, write) as session,
+    ):
+        await session.initialize()
+        return await test_fn(session)
 
 
 class TestE2E:
-    """End-to-end tests consolidated to minimize API calls (50 req/min limit)."""
+    """E2E tests consolidated to minimize API calls (50 req/min limit)."""
 
-    async def test_server_tools_and_hello(self):
+    async def test_server_tools_and_hello(self) -> None:
         """Test server lists tools and hello_world works."""
-        async def test(session):
+        async def test(session: ClientSession) -> None:
             # Check tools are registered
             tools = await session.list_tools()
             tool_names = {t.name for t in tools.tools}
@@ -51,14 +60,16 @@ class TestE2E:
             assert expected == tool_names
 
             # Test hello_world
-            result = await session.call_tool("roam_hello_world", {"name": "E2E"})
+            result = await session.call_tool(
+                "roam_hello_world", {"name": "E2E"}
+            )
             assert "Hello, E2E!" in result.content[0].text
 
         await run_with_session(test)
 
-    async def test_page_not_found(self):
+    async def test_page_not_found(self) -> None:
         """Test fetching a page that doesn't exist returns error."""
-        async def test(session):
+        async def test(session: ClientSession) -> None:
             result = await session.call_tool(
                 "roam_get_page_markdown",
                 {"title": "This Page Should Not Exist 12345xyz"}
@@ -68,9 +79,9 @@ class TestE2E:
 
         await run_with_session(test)
 
-    async def test_daily_notes_and_context(self):
+    async def test_daily_notes_and_context(self) -> None:
         """Test daily note detection and context retrieval."""
-        async def test(session):
+        async def test(session: ClientSession) -> None:
             # Test debug_daily_notes (detects format)
             debug_result = await session.call_tool("roam_debug_daily_notes", {})
             debug_text = debug_result.content[0].text
