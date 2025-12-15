@@ -46,6 +46,14 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
   - `test_e2e.py` - End-to-end tests (require API credentials)
   - `test_client.py` - MCP client integration test
   - `test_mcp_tools.py` - MCP server tools integration test
+- `/reference/` - Reference implementations and documentation
+  - `example-python-git-mcp-server/` - Example MCP server (pattern reference)
+  - `example-roam-research-mcp-js/` - JavaScript Roam MCP (original inspiration)
+  - `roam-python-sdk/` - Roam Python SDK (API client reference)
+  - `readme-mcp-python-sdk.md` - MCP Python SDK documentation
+  - `roam-research-general-info.md` - Roam Research background info
+- `/specs/` - Feature specifications
+  - `semantic-search.md` - Planned semantic search feature spec
 - `pyproject.toml` - Project metadata, dependencies, and build settings
 - `.env` - Environment variables for Roam API token and graph name (not in git)
 
