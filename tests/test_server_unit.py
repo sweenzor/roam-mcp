@@ -10,6 +10,7 @@ from pytest_mock import MockerFixture
 
 from mcp_server_roam.roam_api import (
     AuthenticationError,
+    InvalidQueryError,
     PageNotFoundError,
     RoamAPIError,
 )
@@ -428,6 +429,20 @@ class TestRoamCreateBlock:
 
         assert "Error creating block:" in result
         assert "API Error" in result
+
+    def test_create_block_invalid_query_error(self, mocker: MockerFixture) -> None:
+        """Test error handling when InvalidQueryError is raised."""
+        mock_roam_instance = mocker.MagicMock()
+        # Simulate InvalidQueryError being raised during title lookup
+        mock_roam_instance.run_query.side_effect = InvalidQueryError(
+            "Input contains suspicious pattern"
+        )
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_create_block("Test content", title="[:find ?e :where ...")
+
+        assert "Error: Invalid input" in result
+        assert "suspicious pattern" in result
 
 
 # Tests for roam_context

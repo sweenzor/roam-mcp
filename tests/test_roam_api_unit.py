@@ -1,7 +1,9 @@
 """Comprehensive unit tests for roam_api.py module."""
+import time
 from unittest.mock import MagicMock, patch
 
 import pytest
+import requests
 
 from mcp_server_roam.roam_api import (
     AuthenticationError,
@@ -12,6 +14,7 @@ from mcp_server_roam.roam_api import (
     RoamAPI,
     RoamAPIError,
     ordinal_suffix,
+    retry_with_backoff,
 )
 
 
@@ -43,6 +46,120 @@ class TestOrdinalSuffix:
         assert ordinal_suffix(15) == "th"
         assert ordinal_suffix(20) == "th"
         assert ordinal_suffix(30) == "th"
+
+
+class TestRetryWithBackoff:
+    """Tests for retry_with_backoff decorator."""
+
+    def test_retry_success_on_first_attempt(self) -> None:
+        """Test that function succeeds on first attempt without retries."""
+        call_count = 0
+
+        @retry_with_backoff(max_retries=3)
+        def successful_func() -> str:
+            nonlocal call_count
+            call_count += 1
+            return "success"
+
+        result = successful_func()
+
+        assert result == "success"
+        assert call_count == 1
+
+    @patch("mcp_server_roam.roam_api.time.sleep")
+    def test_retry_success_after_failures(self, mock_sleep: MagicMock) -> None:
+        """Test that function succeeds after initial failures."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=3,
+            initial_backoff=1.0,
+            backoff_multiplier=2.0,
+            retryable_exceptions=(ConnectionError,),
+        )
+        def flaky_func() -> str:
+            nonlocal call_count
+            call_count += 1
+            if call_count < 3:
+                raise ConnectionError("Connection failed")
+            return "success"
+
+        result = flaky_func()
+
+        assert result == "success"
+        assert call_count == 3
+        assert mock_sleep.call_count == 2
+        # Verify backoff timing
+        mock_sleep.assert_any_call(1.0)
+        mock_sleep.assert_any_call(2.0)
+
+    @patch("mcp_server_roam.roam_api.time.sleep")
+    def test_retry_exhausted(self, mock_sleep: MagicMock) -> None:
+        """Test that exception is raised after all retries exhausted."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=2,
+            initial_backoff=1.0,
+            retryable_exceptions=(ConnectionError,),
+        )
+        def always_fails() -> str:
+            nonlocal call_count
+            call_count += 1
+            raise ConnectionError("Connection failed")
+
+        with pytest.raises(ConnectionError) as exc_info:
+            always_fails()
+
+        assert "Connection failed" in str(exc_info.value)
+        assert call_count == 3  # Initial + 2 retries
+        assert mock_sleep.call_count == 2
+
+    @patch("mcp_server_roam.roam_api.time.sleep")
+    def test_retry_max_backoff_capped(self, mock_sleep: MagicMock) -> None:
+        """Test that backoff is capped at max_backoff."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=3,
+            initial_backoff=4.0,
+            backoff_multiplier=4.0,
+            max_backoff=10.0,
+            retryable_exceptions=(ConnectionError,),
+        )
+        def always_fails() -> str:
+            nonlocal call_count
+            call_count += 1
+            raise ConnectionError("Connection failed")
+
+        with pytest.raises(ConnectionError):
+            always_fails()
+
+        # Backoff should be: 4.0, 10.0 (capped from 16), 10.0 (capped from 64)
+        assert mock_sleep.call_count == 3
+        mock_sleep.assert_any_call(4.0)
+        # Second and third calls should be capped at 10.0
+        calls = [call[0][0] for call in mock_sleep.call_args_list]
+        assert calls[1] == 10.0
+        assert calls[2] == 10.0
+
+    def test_retry_non_retryable_exception(self) -> None:
+        """Test that non-retryable exceptions are raised immediately."""
+        call_count = 0
+
+        @retry_with_backoff(
+            max_retries=3, retryable_exceptions=(ConnectionError,)
+        )
+        def raises_value_error() -> str:
+            nonlocal call_count
+            call_count += 1
+            raise ValueError("Not retryable")
+
+        with pytest.raises(ValueError) as exc_info:
+            raises_value_error()
+
+        assert "Not retryable" in str(exc_info.value)
+        assert call_count == 1  # No retries for non-retryable exceptions
 
 
 class TestRoamAPIInit:
@@ -416,6 +533,50 @@ class TestGetReferencesToPage:
 
         assert result == []
 
+    @patch("mcp_server_roam.roam_api.requests.post")
+    def test_get_references_auth_error_reraises(self, mock_post: MagicMock) -> None:
+        """Test get references re-raises AuthenticationError."""
+        error_response = MagicMock()
+        error_response.ok = False
+        error_response.is_redirect = False
+        error_response.status_code = 401
+        error_response.text = "Unauthorized"
+        mock_post.return_value = error_response
+
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+        with pytest.raises(AuthenticationError) as exc_info:
+            api.get_references_to_page("Test Page")
+
+        assert "Authentication error (HTTP 401)" in str(exc_info.value)
+
+    def test_get_references_invalid_query_error_reraises(self) -> None:
+        """Test get references re-raises InvalidQueryError for bad input."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        # Input with suspicious pattern should raise InvalidQueryError
+        with pytest.raises(InvalidQueryError) as exc_info:
+            api.get_references_to_page("[:find ?e :where ...")
+
+        assert "suspicious pattern" in str(exc_info.value)
+
+    @patch("mcp_server_roam.roam_api.requests.post")
+    def test_get_references_rate_limit_returns_empty(
+        self, mock_post: MagicMock
+    ) -> None:
+        """Test get references returns empty list on rate limit error."""
+        error_response = MagicMock()
+        error_response.ok = False
+        error_response.is_redirect = False
+        error_response.status_code = 429
+        error_response.text = "Too Many Requests"
+        mock_post.return_value = error_response
+
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+        result = api.get_references_to_page("Test Page")
+
+        # Rate limit error should be caught and return empty list
+        assert result == []
+
 
 class TestGetBlock:
     """Tests for RoamAPI.get_block method."""
@@ -690,8 +851,16 @@ class TestFindDailyNoteFormat:
             resp.json.return_value = {"result": []}
             return resp
 
-        # First call raises exception, rest return empty
-        mock_post.side_effect = [Exception("Network error")] + [
+        def create_error_response() -> MagicMock:
+            resp = MagicMock()
+            resp.ok = False
+            resp.is_redirect = False
+            resp.status_code = 500
+            resp.text = "Internal Server Error"
+            return resp
+
+        # First call returns server error, rest return empty
+        mock_post.side_effect = [create_error_response()] + [
             create_empty_response() for _ in range(15)
         ]
 
@@ -700,6 +869,22 @@ class TestFindDailyNoteFormat:
 
         # Should fall back to default after all attempts
         assert result == "%m-%d-%Y"
+
+    @patch("mcp_server_roam.roam_api.requests.post")
+    def test_find_format_auth_error_reraises(self, mock_post: MagicMock) -> None:
+        """Test that AuthenticationError during format detection is re-raised."""
+        error_response = MagicMock()
+        error_response.ok = False
+        error_response.is_redirect = False
+        error_response.status_code = 401
+        error_response.text = "Unauthorized"
+        mock_post.return_value = error_response
+
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+        with pytest.raises(AuthenticationError) as exc_info:
+            api.find_daily_note_format()
+
+        assert "Authentication error (HTTP 401)" in str(exc_info.value)
 
 
 class TestGetDailyNotesContext:

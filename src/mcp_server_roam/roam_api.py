@@ -109,7 +109,7 @@ def retry_with_backoff(
             if last_exception:
                 raise last_exception
             # This should never happen, but satisfies type checker
-            raise RuntimeError("Retry logic failed unexpectedly")
+            raise RuntimeError("Retry logic failed unexpectedly")  # pragma: no cover
 
         return wrapper
     return decorator
