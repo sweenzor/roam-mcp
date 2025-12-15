@@ -7,9 +7,16 @@ Run with credentials::
 
     ROAM_API_TOKEN=xxx ROAM_GRAPH_NAME=xxx uv run pytest tests/test_e2e.py -v
 
+Credentials can also be loaded from a .env file in the project root.
+
 Note: Roam API has a 50 req/min rate limit. Tests are consolidated.
 """
 import os
+
+from dotenv import load_dotenv
+
+# Attempt to load credentials from .env file if not already in environment
+load_dotenv()
 import re
 from collections.abc import Awaitable, Callable
 from typing import Any
