@@ -44,5 +44,5 @@ def main(verbose: bool) -> None:
     asyncio.run(serve())
 
 
-if __name__ == "__main__":
+if __name__ == "__main__":  # pragma: no cover
     main()
