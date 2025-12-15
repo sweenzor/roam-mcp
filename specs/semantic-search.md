@@ -16,7 +16,7 @@ Build a Python MCP server that connects to a Roam Research graph via the officia
 - Graph size: ~10k pages, 19MB of text
 - Heavy use of daily note pages
 - High technical comfort level
-- OK with sending data to embedding APIs
+- Prefer local embeddings for privacy
 
 ---
 
@@ -31,13 +31,14 @@ Build a Python MCP server that connects to a Roam Research graph via the officia
 │  │  Client         │       │                             │ │
 │  │                 │       │  ┌─────────────────────┐    │ │
 │  │  • query()      │       │  │  Embedding Service  │    │ │
-│  │  • pull()       │       │  │  (OpenAI or local)  │    │ │
-│  │  • create/      │       │  └─────────────────────┘    │ │
-│  │    update/      │       │             │               │ │
-│  │    delete       │       │             ▼               │ │
-│  └─────────────────┘       │  ┌─────────────────────┐    │ │
+│  │  • pull()       │       │  │  (sentence-         │    │ │
+│  │  • create/      │       │  │   transformers)     │    │ │
+│  │    update/      │       │  └─────────────────────┘    │ │
+│  │    delete       │       │             │               │ │
+│  └─────────────────┘       │             ▼               │ │
+│           │                │  ┌─────────────────────┐    │ │
 │           │                │  │  SQLite + sqlite-   │    │ │
-│           │                │  │  vss (vector store) │    │ │
+│           │                │  │  vec (vector store) │    │ │
 │           │                │  └─────────────────────┘    │ │
 │           │                └─────────────────────────────┘ │
 │           │                              │                  │
@@ -138,6 +139,8 @@ Content-Type: application/json
 
 ## MCP Tools to Expose
 
+**Note:** These tools replace the existing `roam_*` prefixed tools. The new naming convention drops the prefix for cleaner tool names.
+
 ### 1. `semantic_search`
 Search the graph by meaning/concept.
 
@@ -156,12 +159,14 @@ Search the graph by meaning/concept.
 **Implementation:**
 1. Check if any blocks modified since last sync → embed them first
 2. Embed the query
-3. Vector search in SQLite-vss
-4. For each result, fetch context from Roam API
-5. Return enriched results
+3. Vector search in sqlite-vec
+4. Apply recency boost to ranking
+5. Filter results below similarity threshold
+6. For each result, fetch context from Roam API
+7. Return enriched results
 
 ### 2. `get_page`
-Fetch a page by title with full content.
+Fetch a page by title with full content. (Replaces `roam_get_page_markdown`)
 
 **Parameters:**
 - `title` (string): Page title (case-sensitive)
@@ -220,13 +225,53 @@ Execute arbitrary Datalog query (for power users).
 
 **Returns:** Raw query results
 
+### 8. `create_block`
+Add blocks to pages or under parent blocks. (Replaces `roam_create_block`)
+
+**Parameters:**
+- `content` (string): Block content
+- `page_title` (string, optional): Page to add block to
+- `parent_uid` (string, optional): Parent block UID
+
+**Returns:** Created block UID and confirmation
+
+### 9. `daily_context`
+Get daily notes with their backlinks for comprehensive context. (Replaces `roam_context`)
+
+**Parameters:**
+- `days` (int, default 10): Number of days to fetch
+- `max_references` (int, default 10): Max references per day
+
+**Returns:** Markdown with daily note content + blocks that reference each daily note
+
+### 10. `sync_index`
+Build or rebuild the vector index for semantic search.
+
+**Parameters:**
+- `full` (bool, default false): Force full resync even if index exists
+
+**Returns:** Final status (blocks synced, time taken)
+
+**Progress reporting:** Uses MCP Context for real-time updates:
+```python
+ctx.info(f"Fetching blocks from Roam...")
+await ctx.report_progress(i, total_blocks)
+```
+
+**Behavior:**
+- If no index exists: performs full sync of all blocks
+- If index exists and `full=false`: performs incremental sync only
+- If index exists and `full=true`: drops and rebuilds entire index
+
+This allows Claude to detect when semantic_search fails due to missing index and suggest running sync, with user approval via normal MCP tool flow.
+
 ---
 
 ## Vector Index Design
 
-### Storage: SQLite + sqlite-vss
+### Storage: SQLite + sqlite-vec
 
-Use a local SQLite database with the `sqlite-vss` extension for vector similarity search. This keeps everything local and avoids external vector DB dependencies.
+Use a local SQLite database with the `sqlite-vec` extension for vector similarity search. sqlite-vec is the actively maintained successor to sqlite-vss, with better performance and ongoing development.
 
 ### Schema
 
@@ -254,39 +299,45 @@ CREATE TABLE sync_state (
 );
 -- Store last_sync_timestamp here
 
-CREATE VIRTUAL TABLE vss_embeddings USING vss0(
-    embedding(1536)  -- OpenAI ada-002 dimension, adjust if using different model
+-- sqlite-vec virtual table for vector search
+CREATE VIRTUAL TABLE vec_embeddings USING vec0(
+    uid TEXT PRIMARY KEY,
+    embedding FLOAT[384]  -- all-MiniLM-L6-v2 dimension
 );
 ```
 
 ### Chunking Strategy
 
-Each block becomes one vector, but the text we embed includes context:
+Each block becomes one vector. The text we embed includes full hierarchical context:
 ```
 Page: {page_title}
-Path: {parent1} > {parent2} > {parent3}
+Path: {parent1} > {parent2} > ... > {parentN}
 Content: {block_content}
 ```
 
-This helps the embedding capture hierarchical context.
+This helps the embedding capture hierarchical context. The full parent path is included.
 
-### Embedding Model Options
+**Design decision:** Embed all blocks regardless of length. This is the simplest approach. If performance or quality suffers, revisit with options like:
+- Skip blocks under N characters
+- Concatenate short parent + children into one embedding
 
-**Recommended: OpenAI text-embedding-3-small**
-- 1536 dimensions
-- Fast, cheap ($0.02/1M tokens)
-- High quality
+### Embedding Model
 
-**Alternative: Local with sentence-transformers**
-- Model: `all-MiniLM-L6-v2` (384 dimensions)
-- Free, private
-- Slightly lower quality
+**Local with sentence-transformers (chosen for privacy)**
+- Model: `all-MiniLM-L6-v2`
+- 384 dimensions
+- Free, completely private
+- Good quality for semantic similarity
 
 ---
 
 ## Sync Strategy
 
 ### Initial Full Sync
+
+When `semantic_search` is called with no vector index, it returns a message indicating sync is needed. Claude can then suggest calling `sync_index`, and the user approves via normal MCP tool flow.
+
+Initial sync steps:
 1. Query all blocks from Roam
 2. Build parent chains for each block
 3. Embed all blocks in batches
@@ -294,8 +345,7 @@ This helps the embedding capture hierarchical context.
 
 For 19MB / 10k pages, estimate:
 - ~50-100k blocks
-- ~$1-2 in embedding costs
-- 10-20 minutes
+- 10-20 minutes (local embedding)
 
 ### Incremental Sync (Query-Time)
 
@@ -329,13 +379,27 @@ Roam doesn't easily expose deleted blocks. Options:
 
 ---
 
+## Search Ranking
+
+Results are ranked using a hybrid approach:
+
+1. **Vector similarity** (primary): Cosine similarity from sqlite-vec
+2. **Recency boost**: Recently edited blocks get a boost to their score
+3. **Similarity threshold**: Results below a minimum similarity score (e.g., 0.3) are filtered out
+
+**Future improvements to consider:**
+- Reference count boost (well-linked blocks rank higher)
+- Page type filtering (exclude daily notes from general search)
+
+---
+
 ## Tech Stack
 
 - **Python 3.11+**
 - **MCP SDK**: `mcp` package for Python
 - **HTTP client**: `httpx` for async Roam API calls
-- **Vector store**: `sqlite-vss` (or `sqlite-vec` as alternative)
-- **Embeddings**: `openai` package (or `sentence-transformers` for local)
+- **Vector store**: `sqlite-vec`
+- **Embeddings**: `sentence-transformers` (local)
 - **Config**: Environment variables or `.env` file
 
 ### Dependencies
@@ -343,8 +407,8 @@ Roam doesn't easily expose deleted blocks. Options:
 ```
 mcp
 httpx
-openai
-sqlite-vss  # or sqlite-vec
+sqlite-vec
+sentence-transformers
 python-dotenv
 ```
 
@@ -357,8 +421,6 @@ Environment variables:
 ```bash
 ROAM_API_TOKEN=your-api-token
 ROAM_GRAPH_NAME=your-graph-name
-OPENAI_API_KEY=your-openai-key  # if using OpenAI embeddings
-EMBEDDING_MODEL=text-embedding-3-small  # or "local" for sentence-transformers
 VECTOR_DB_PATH=~/.roam-mcp/vectors.db
 ```
 
@@ -366,31 +428,38 @@ VECTOR_DB_PATH=~/.roam-mcp/vectors.db
 
 ## Implementation Phases
 
-### Phase 1: Core Roam API Client
+### Phase 1: Core Roam API Client ✓
 - Implement authenticated requests to Roam API
 - Build query helpers for common Datalog patterns
 - Test fetching pages, blocks, backlinks
 
-### Phase 2: MCP Server Shell
+*Status: Already implemented in `roam_api.py`*
+
+### Phase 2: MCP Server with Basic Tools ✓
 - Set up MCP server with Python SDK
-- Implement non-semantic tools first:
-  - `get_page`
-  - `get_block_context`
-  - `get_backlinks`
-  - `get_daily_note`
-  - `search_by_text`
-  - `raw_query`
+- Implement basic tools (`get_page`, `create_block`, `daily_context`)
+
+*Status: Mostly complete. Existing tools work.*
+
+### Phase 2.5: Additional Non-Semantic Tools
+- Add `get_block_context` tool
+- Add `search_by_text` tool (keyword search via Datalog)
+- Add `raw_query` tool
+- Add `get_backlinks` tool
+- Rename existing tools to drop `roam_` prefix
 - Test with Claude Desktop
 
 ### Phase 3: Vector Index
-- Set up SQLite with sqlite-vss
-- Implement embedding service (OpenAI or local)
-- Build initial sync: fetch all blocks, embed, store
-- Implement incremental sync logic
+- Set up SQLite with sqlite-vec
+- Implement embedding service with sentence-transformers
+- Implement `sync_index` tool for full/incremental sync
+- Build sync logic: fetch all blocks, embed, store
 
 ### Phase 4: Semantic Search
 - Implement `semantic_search` tool
 - Add query-time incremental sync
+- Implement recency boost ranking
+- Add similarity threshold filtering
 - Enrich results with context from Roam API
 - Test and tune retrieval quality
 
@@ -410,26 +479,12 @@ Add to `~/Library/Application Support/Claude/claude_desktop_config.json`:
 {
   "mcpServers": {
     "roam": {
-      "command": "python",
-      "args": ["-m", "roam_mcp_server"],
+      "command": "uv",
+      "args": ["--directory", "/path/to/roam-mcp", "run", "python", "-m", "mcp_server_roam"],
       "env": {
         "ROAM_API_TOKEN": "your-token",
-        "ROAM_GRAPH_NAME": "your-graph",
-        "OPENAI_API_KEY": "your-key"
+        "ROAM_GRAPH_NAME": "your-graph"
       }
-    }
-  }
-}
-```
-
-Or if using uv/uvx:
-```json
-{
-  "mcpServers": {
-    "roam": {
-      "command": "uvx",
-      "args": ["roam-mcp-server"],
-      "env": { ... }
     }
   }
 }
@@ -443,7 +498,7 @@ Or if using uv/uvx:
 
 **Claude:**
 1. Calls `semantic_search(query="raising money for startups venture capital fundraising")`
-2. Gets back relevant blocks with context
+2. Gets back relevant blocks with context, ranked by similarity + recency
 3. If needed, calls `get_page` or `get_backlinks` to explore connections
 4. Synthesizes answer from the retrieved content
 
@@ -451,20 +506,24 @@ Or if using uv/uvx:
 
 **Claude:**
 1. Calculates date for "last Tuesday"
-2. Calls `get_daily_note(date="12-10-2024")` 
+2. Calls `get_daily_note(date="12-10-2024")`
 3. Also calls `semantic_search(query="meeting John")` to find related content
 4. Returns relevant sections
 
 ---
 
-## Open Questions / Decisions for Implementation
+## Design Decisions Log
 
-1. **sqlite-vss vs sqlite-vec**: sqlite-vec is newer and may have better performance. Research which is better supported.
+Decisions made during planning:
 
-2. **Embedding batch size**: What's the optimal batch size for embedding calls? (Probably 100-500 texts per request)
-
-3. **Context window for embedding**: How much parent context to include? Too much dilutes the block's meaning; too little loses context.
-
-4. **Result ranking**: Pure vector similarity, or hybrid with recency/importance weighting?
-
-5. **Block size threshold**: Should we skip very short blocks (e.g., single words)? Or embed everything?
+| Question | Decision | Notes |
+|----------|----------|-------|
+| sqlite-vss vs sqlite-vec | sqlite-vec | Actively maintained, better performance |
+| Embedding model | Local (sentence-transformers) | Privacy, no API costs |
+| Block size threshold | Embed everything | Revisit if quality/perf issues |
+| Parent context depth | Full path | Revisit if embedding quality suffers |
+| Sync strategy | Query-time incremental | Acceptable latency |
+| Initial sync UX | `sync_index` tool | Claude suggests, user approves via MCP flow |
+| Result ranking | Similarity + recency boost | Add more signals later if needed |
+| Similarity threshold | Yes, filter low scores | Prevent irrelevant results |
+| Tool naming | Drop `roam_` prefix | Cleaner, replaces existing tools |
