@@ -10,12 +10,21 @@ from pytest_mock import MockerFixture
 
 from mcp_server_roam.roam_api import (
     AuthenticationError,
+    InvalidQueryError,
     PageNotFoundError,
     RoamAPIError,
 )
 from mcp_server_roam.server import (
+    call_tool,
+    get_roam_client,
+    list_tools,
+    roam_context,
+    roam_create_block,
+    roam_debug_daily_notes,
     roam_get_page_markdown,
     roam_hello_world,
+    serve,
+    server,
 )
 
 ROAM_CLIENT_PATH = "mcp_server_roam.server.get_roam_client"
@@ -353,3 +362,355 @@ class TestRoamGetPageMarkdownIntegration:
         assert "    - Level 3\n" in result
         assert "      - Level 4\n" in result
         assert "        - Level 5\n" in result
+
+
+# Tests for get_roam_client singleton
+class TestGetRoamClient:
+    """Tests for the get_roam_client singleton."""
+
+    def test_get_roam_client_creates_instance(self, mocker: MockerFixture) -> None:
+        """Test that get_roam_client creates a RoamAPI instance."""
+        import mcp_server_roam.server as server_module
+
+        # Reset the singleton
+        server_module._roam_client = None
+
+        mock_roam_class = mocker.patch("mcp_server_roam.server.RoamAPI")
+        mock_instance = mocker.MagicMock()
+        mock_roam_class.return_value = mock_instance
+
+        result = get_roam_client()
+
+        assert result == mock_instance
+        mock_roam_class.assert_called_once()
+
+    def test_get_roam_client_returns_singleton(self, mocker: MockerFixture) -> None:
+        """Test that get_roam_client returns the same instance."""
+        import mcp_server_roam.server as server_module
+
+        # Reset the singleton
+        server_module._roam_client = None
+
+        mock_roam_class = mocker.patch("mcp_server_roam.server.RoamAPI")
+        mock_instance = mocker.MagicMock()
+        mock_roam_class.return_value = mock_instance
+
+        result1 = get_roam_client()
+        result2 = get_roam_client()
+
+        assert result1 is result2
+        # Should only be called once since we use singleton
+        mock_roam_class.assert_called_once()
+
+
+# Tests for roam_create_block
+class TestRoamCreateBlock:
+    """Tests for roam_create_block function."""
+
+    def test_create_block_page_not_found(self, mocker: MockerFixture) -> None:
+        """Test error when page title is provided but page not found."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.run_query.return_value = []  # No results
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_create_block("Test content", title="NonexistentPage")
+
+        assert "Error:" in result
+        assert "NonexistentPage" in result
+        assert "not found" in result
+
+    def test_create_block_api_error(self, mocker: MockerFixture) -> None:
+        """Test error handling when API raises an error."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.create_block.side_effect = RoamAPIError("API Error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_create_block("Test content", page_uid="page-uid")
+
+        assert "Error creating block:" in result
+        assert "API Error" in result
+
+    def test_create_block_invalid_query_error(self, mocker: MockerFixture) -> None:
+        """Test error handling when InvalidQueryError is raised."""
+        mock_roam_instance = mocker.MagicMock()
+        # Simulate InvalidQueryError being raised during title lookup
+        mock_roam_instance.run_query.side_effect = InvalidQueryError(
+            "Input contains suspicious pattern"
+        )
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_create_block("Test content", title="[:find ?e :where ...")
+
+        assert "Error: Invalid input" in result
+        assert "suspicious pattern" in result
+
+
+# Tests for roam_context
+class TestRoamContext:
+    """Tests for roam_context function."""
+
+    def test_context_invalid_days_zero(self) -> None:
+        """Test error for days parameter < 1."""
+        result = roam_context(days=0)
+        assert "Error:" in result
+        assert "days" in result.lower()
+
+    def test_context_invalid_days_negative(self) -> None:
+        """Test error for negative days parameter."""
+        result = roam_context(days=-1)
+        assert "Error:" in result
+        assert "days" in result.lower()
+
+    def test_context_invalid_days_too_large(self) -> None:
+        """Test error for days parameter > 30."""
+        result = roam_context(days=31)
+        assert "Error:" in result
+        assert "days" in result.lower()
+
+    def test_context_invalid_max_references_zero(self) -> None:
+        """Test error for max_references parameter < 1."""
+        result = roam_context(days=10, max_references=0)
+        assert "Error:" in result
+        assert "max_references" in result.lower()
+
+    def test_context_invalid_max_references_negative(self) -> None:
+        """Test error for negative max_references parameter."""
+        result = roam_context(days=10, max_references=-1)
+        assert "Error:" in result
+        assert "max_references" in result.lower()
+
+    def test_context_invalid_max_references_too_large(self) -> None:
+        """Test error for max_references parameter > 100."""
+        result = roam_context(days=10, max_references=101)
+        assert "Error:" in result
+        assert "max_references" in result.lower()
+
+    def test_context_success(self, mocker: MockerFixture) -> None:
+        """Test successful context retrieval."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_daily_notes_context.return_value = "# Daily Notes"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_context(days=5, max_references=10)
+
+        assert result == "# Daily Notes"
+        mock_roam_instance.get_daily_notes_context.assert_called_once_with(5, 10)
+
+    def test_context_api_error(self, mocker: MockerFixture) -> None:
+        """Test error handling when API raises an error."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_daily_notes_context.side_effect = RoamAPIError(
+            "API Error"
+        )
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_context(days=5, max_references=10)
+
+        assert "Error fetching context:" in result
+        assert "API Error" in result
+
+
+# Tests for roam_debug_daily_notes
+class TestRoamDebugDailyNotes:
+    """Tests for roam_debug_daily_notes function."""
+
+    def test_debug_daily_notes_success(self, mocker: MockerFixture) -> None:
+        """Test successful debug output."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
+        mock_roam_instance.get_page.return_value = {
+            ":block/children": [{":block/string": "Test"}]
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_debug_daily_notes()
+
+        assert "Daily Notes Debug" in result
+        assert "Detected format" in result
+        assert "%B %d, %Y" in result
+
+    def test_debug_daily_notes_page_not_found(self, mocker: MockerFixture) -> None:
+        """Test when daily note page not found."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
+        mock_roam_instance.get_page.side_effect = PageNotFoundError("Not found")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_debug_daily_notes()
+
+        assert "Daily Notes Debug" in result
+        assert "Not found" in result
+
+    def test_debug_daily_notes_api_error_in_get_page(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test when get_page raises API error."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
+        mock_roam_instance.get_page.side_effect = RoamAPIError("API Error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_debug_daily_notes()
+
+        assert "Daily Notes Debug" in result
+        assert "API Error" in result
+
+    def test_debug_daily_notes_api_error_in_format(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test when find_daily_note_format raises API error."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.find_daily_note_format.side_effect = RoamAPIError(
+            "API Error"
+        )
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_debug_daily_notes()
+
+        assert "Error:" in result
+        assert "API Error" in result
+
+    def test_debug_daily_notes_ordinal_format(self, mocker: MockerFixture) -> None:
+        """Test debug with ordinal date format."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.find_daily_note_format.return_value = "%B %dth, %Y"
+        mock_roam_instance.get_page.return_value = {
+            ":block/children": [{":block/string": "Test"}]
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = roam_debug_daily_notes()
+
+        assert "Daily Notes Debug" in result
+        assert "%B %dth, %Y" in result
+
+
+# Tests for call_tool
+class TestCallTool:
+    """Tests for call_tool handler."""
+
+    @pytest.mark.asyncio
+    async def test_call_tool_hello_world(self) -> None:
+        """Test call_tool handles hello_world."""
+        result = await call_tool("roam_hello_world", {"name": "Test"})
+
+        assert len(result) == 1
+        assert result[0].type == "text"
+        assert "Hello, Test!" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_hello_world_default(self) -> None:
+        """Test call_tool handles hello_world with default name."""
+        result = await call_tool("roam_hello_world", {})
+
+        assert len(result) == 1
+        assert "Hello, World!" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_get_page_markdown(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles get_page_markdown."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_page.return_value = {":block/children": []}
+        mock_roam_instance.process_blocks.return_value = ""
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = await call_tool("roam_get_page_markdown", {"title": "Test Page"})
+
+        assert len(result) == 1
+        assert "Test Page" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_create_block(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles create_block."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.create_block.return_value = {"uid": "test-uid"}
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = await call_tool(
+            "roam_create_block", {"content": "Test", "page_uid": "page123"}
+        )
+
+        assert len(result) == 1
+        assert "Created block" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_context(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles context."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_daily_notes_context.return_value = "# Daily Notes"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = await call_tool("roam_context", {"days": 5, "max_references": 10})
+
+        assert len(result) == 1
+        assert "Daily Notes" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_debug_daily_notes(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles debug_daily_notes."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
+        mock_roam_instance.get_page.return_value = {":block/children": []}
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = await call_tool("roam_debug_daily_notes", {})
+
+        assert len(result) == 1
+        assert "Daily Notes Debug" in result[0].text
+
+    @pytest.mark.asyncio
+    async def test_call_tool_unknown_tool(self) -> None:
+        """Test call_tool raises error for unknown tool."""
+        with pytest.raises(ValueError) as exc_info:
+            await call_tool("unknown_tool", {})
+        assert "Unknown tool" in str(exc_info.value)
+
+
+# Tests for list_tools
+class TestListTools:
+    """Tests for list_tools handler."""
+
+    @pytest.mark.asyncio
+    async def test_list_tools_returns_all_tools(self) -> None:
+        """Test that list_tools returns all registered tools."""
+        tools = await list_tools()
+
+        tool_names = [tool.name for tool in tools]
+        assert "roam_hello_world" in tool_names
+        assert "roam_get_page_markdown" in tool_names
+        assert "roam_create_block" in tool_names
+        assert "roam_context" in tool_names
+        assert "roam_debug_daily_notes" in tool_names
+        assert len(tools) == 5
+
+
+# Tests for serve function
+class TestServe:
+    """Tests for the serve function."""
+
+    @pytest.mark.asyncio
+    async def test_serve_initialization(self, mocker: MockerFixture) -> None:
+        """Test that serve initializes and runs the server."""
+        # Mock the stdio_server context manager
+        mock_read_stream = mocker.MagicMock()
+        mock_write_stream = mocker.MagicMock()
+
+        mock_stdio = mocker.MagicMock()
+        mock_stdio.__aenter__ = mocker.AsyncMock(
+            return_value=(mock_read_stream, mock_write_stream)
+        )
+        mock_stdio.__aexit__ = mocker.AsyncMock(return_value=None)
+
+        mocker.patch(
+            "mcp_server_roam.server.stdio_server", return_value=mock_stdio
+        )
+
+        # Mock server.run to avoid actually running
+        mock_run = mocker.patch.object(server, "run", new_callable=mocker.AsyncMock)
+
+        await serve()
+
+        mock_run.assert_called_once()
+        call_args = mock_run.call_args
+        assert call_args[0][0] == mock_read_stream
+        assert call_args[0][1] == mock_write_stream
