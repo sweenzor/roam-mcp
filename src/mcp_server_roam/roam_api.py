@@ -5,6 +5,7 @@ import os
 import re
 import time
 from collections.abc import Callable
+from datetime import datetime, timedelta
 from typing import Any, TypeVar
 
 import requests
@@ -95,14 +96,19 @@ def retry_with_backoff(
                     last_exception = e
                     if attempt < max_retries:
                         logger.warning(
-                            f"Attempt {attempt + 1}/{max_retries + 1} failed: {e}. "
-                            f"Retrying in {backoff:.1f}s..."
+                            "Attempt %d/%d failed: %s. Retrying in %.1fs...",
+                            attempt + 1,
+                            max_retries + 1,
+                            e,
+                            backoff,
                         )
                         time.sleep(backoff)
                         backoff = min(backoff * backoff_multiplier, max_backoff)
                     else:
                         logger.error(
-                            f"All {max_retries + 1} attempts failed. Last error: {e}"
+                            "All %d attempts failed. Last error: %s",
+                            max_retries + 1,
+                            e,
                         )
 
             # If we get here, all retries failed
@@ -116,7 +122,14 @@ def retry_with_backoff(
 
 
 def ordinal_suffix(day: int) -> str:
-    """Return ordinal suffix (st, nd, rd, th) for a day number."""
+    """Return ordinal suffix (st, nd, rd, th) for a day number.
+
+    Args:
+        day: The day of the month (1-31).
+
+    Returns:
+        The ordinal suffix string ('st', 'nd', 'rd', or 'th').
+    """
     if day in (1, 21, 31):
         return "st"
     if day in (2, 22):
@@ -132,33 +145,31 @@ load_dotenv()
 
 # Custom Exception Classes
 class RoamAPIError(Exception):
-    """Base exception class for all Roam API errors."""
-    pass
+    """Base exception for all Roam API errors.
+
+    This is the parent class for all exceptions raised by the Roam API client.
+    Catch this to handle any Roam-related error.
+    """
 
 
 class PageNotFoundError(RoamAPIError):
     """Raised when a requested page is not found in the Roam graph."""
-    pass
 
 
 class BlockNotFoundError(RoamAPIError):
     """Raised when a requested block is not found in the Roam graph."""
-    pass
 
 
 class AuthenticationError(RoamAPIError):
     """Raised when authentication with the Roam API fails."""
-    pass
 
 
 class RateLimitError(RoamAPIError):
     """Raised when the Roam API rate limit is exceeded."""
-    pass
 
 
 class InvalidQueryError(RoamAPIError):
     """Raised when a query or request to the Roam API is invalid."""
-    pass
 
 
 class RoamAPI:
@@ -242,10 +253,17 @@ class RoamAPI:
         self.graph_name: str = resolved_graph
         self._redirect_cache: dict[str, str] = {}
         self._daily_note_format: str | None = None
-        logger.info(f"Initialized RoamAPI client for graph: {self.graph_name}")
+        logger.info("Initialized RoamAPI client for graph: %s", self.graph_name)
 
     def _mask_token(self, token: str) -> str:
-        """Mask a token for logging, showing first/last 4 chars if long enough."""
+        """Mask a token for logging, showing first/last 4 chars if long enough.
+
+        Args:
+            token: The token string to mask.
+
+        Returns:
+            A masked version of the token for safe logging.
+        """
         if len(token) > 8:
             return f"{token[:4]}...{token[-4:]}"
         return "***"
@@ -312,9 +330,9 @@ class RoamAPI:
             "x-authorization": f"Bearer {self.api_token}",
         }
 
-        logger.info(f"Making POST request to: {url}")
+        logger.info("Making POST request to: %s", url)
         masked_token = self._mask_token(self.api_token)
-        logger.info(f"Request headers: Authorization: Bearer {masked_token}")
+        logger.info("Request headers: Authorization: Bearer %s", masked_token)
 
         resp = self._make_request(url, headers, body)
 
@@ -325,7 +343,7 @@ class RoamAPI:
                 raise InvalidQueryError(msg)
 
             location = resp.headers["Location"]
-            logger.info(f"Received redirect to: {location}")
+            logger.info("Received redirect to: %s", location)
 
             match = re.search(r"https://(peer-\d+).*?:(\d+)", location)
             if not match:
@@ -334,13 +352,13 @@ class RoamAPI:
             peer, port = match.groups()
             redirect_url = f"https://{peer}.api.roamresearch.com:{port}"
             self._redirect_cache[self.graph_name] = redirect_url
-            logger.info(f"Cached redirect URL: {redirect_url}")
+            logger.info("Cached redirect URL: %s", redirect_url)
             return self.call(path, body)
 
         # Handle errors
         if not resp.ok:
-            logger.error(f"Error response status: {resp.status_code}")
-            logger.error(f"Error response body: {resp.text}")
+            logger.error("Error response status: %s", resp.status_code)
+            logger.error("Error response body: %s", resp.text)
             if resp.status_code == 500:
                 raise RoamAPIError(f"Server error (HTTP 500): {resp.text!s}")
             elif resp.status_code == 400:
@@ -384,7 +402,18 @@ class RoamAPI:
         return result.get('result', [])
 
     def pull(self, eid: str, pattern: str = "[*]") -> dict[str, Any]:
-        """Get an entity by its ID."""
+        """Get an entity by its ID using a pull pattern.
+
+        Args:
+            eid: The entity ID to pull.
+            pattern: The pull pattern to use for selecting attributes.
+
+        Returns:
+            The entity data matching the pull pattern.
+
+        Raises:
+            RoamAPIError: If the API request fails.
+        """
         path = f"/api/graph/{self.graph_name}/pull"
         body = {"eid": eid, "selector": pattern}
         resp = self.call(path, body)
@@ -444,12 +473,12 @@ class RoamAPI:
         except RateLimitError as e:
             # Rate limit is recoverable but should be logged as warning
             logger.warning(
-                f"Rate limit hit while finding references to {page_title}: {e}"
+                "Rate limit hit while finding references to %s: %s", page_title, e
             )
             return []
         except RoamAPIError as e:
             # Other API errors are logged as warnings and return empty list
-            logger.warning(f"Error finding references to {page_title}: {e}")
+            logger.warning("Error finding references to %s: %s", page_title, e)
             return []
 
     def get_block(self, block_uid: str) -> dict[str, Any]:
@@ -580,8 +609,6 @@ class RoamAPI:
         if self._daily_note_format is not None:
             return self._daily_note_format
 
-        from datetime import datetime
-
         today = datetime.now()
 
         for fmt in DAILY_NOTE_FORMATS:
@@ -591,7 +618,7 @@ class RoamAPI:
                 else:
                     date_str = today.strftime(fmt)
 
-                logger.info(f"Trying daily note format: {date_str}")
+                logger.info("Trying daily note format: %s", date_str)
 
                 # Sanitize date string to prevent query injection
                 sanitized_date = self._sanitize_query_input(date_str)
@@ -601,7 +628,7 @@ class RoamAPI:
                 results = self.run_query(query)
 
                 if results:
-                    logger.info(f"Found daily note with format: {fmt} -> {date_str}")
+                    logger.info("Found daily note with format: %s -> %s", fmt, date_str)
                     self._daily_note_format = fmt
                     return fmt
 
@@ -610,7 +637,7 @@ class RoamAPI:
                 raise
             except (RoamAPIError, InvalidQueryError, ValueError, KeyError) as e:
                 # Log specific expected errors during format detection
-                logger.debug(f"Format {fmt} failed: {e}")
+                logger.debug("Format %s failed: %s", fmt, e)
                 continue
 
         logger.warning("No daily note format found, using default")
@@ -630,13 +657,11 @@ class RoamAPI:
         Raises:
             RoamAPIError: If there are API errors during data retrieval.
         """
-        from datetime import datetime, timedelta
-
         context_parts = []
 
         # Auto-detect the daily note format
         date_format = self.find_daily_note_format()
-        logger.info(f"Using daily note format: {date_format}")
+        logger.info("Using daily note format: %s", date_format)
 
         # Get the last N days
         for i in range(days):
@@ -647,7 +672,7 @@ class RoamAPI:
             else:
                 date_str = date.strftime(date_format)
 
-            logger.info(f"Processing daily note: {date_str}")
+            logger.info("Processing daily note: %s", date_str)
 
             # Build this day's section
             day_content = [f"## {date_str}\n"]
@@ -676,12 +701,13 @@ class RoamAPI:
                 # Only add if we have content
                 if len(day_content) > 1:  # More than just the header
                     context_parts.append("".join(day_content))
-                    ref_count = len(references)
-                    logger.info(f"Added daily note: {date_str} with {ref_count} refs")
+                    logger.info(
+                        "Added daily note: %s with %d refs", date_str, len(references)
+                    )
 
             except PageNotFoundError as e:
                 # Daily note doesn't exist for this day
-                logger.debug(f"Daily note {date_str} not found: {e}")
+                logger.debug("Daily note %s not found: %s", date_str, e)
                 continue
 
         # Combine everything
@@ -698,7 +724,7 @@ class RoamAPI:
         blocks: list[dict[str, Any]],
         depth: int = 0,
         extract_links: bool = False,
-        linked_pages: set | None = None,
+        linked_pages: set[str] | None = None,
     ) -> str:
         """Recursively process blocks and convert them to markdown.
 

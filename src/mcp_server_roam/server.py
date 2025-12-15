@@ -1,11 +1,12 @@
 """MCP server implementation for Roam Research API."""
+from datetime import datetime, timedelta
+
 from dotenv import load_dotenv
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 
-# Import our Roam API client and custom exceptions
 from mcp_server_roam.roam_api import (
     ORDINAL_DATE_FORMATS,
     InvalidQueryError,
@@ -23,7 +24,11 @@ _roam_client: RoamAPI | None = None
 
 
 def get_roam_client() -> RoamAPI:
-    """Get or create the singleton RoamAPI client instance."""
+    """Get or create the singleton RoamAPI client instance.
+
+    Returns:
+        The singleton RoamAPI client instance.
+    """
     global _roam_client
     if _roam_client is None:
         _roam_client = RoamAPI()
@@ -66,7 +71,14 @@ class RoamDebugDailyNotes(BaseModel):
 
 # Tool implementation functions
 def roam_hello_world(name: str = "World") -> str:
-    """Simple hello world tool for Roam Research MCP."""
+    """Simple hello world tool for Roam Research MCP.
+
+    Args:
+        name: The name to greet.
+
+    Returns:
+        A greeting message.
+    """
     return f"Hello, {name}! This is the Roam Research MCP server."
 
 
@@ -107,7 +119,16 @@ def roam_get_page_markdown(title: str) -> str:
 def roam_create_block(
     content: str, page_uid: str | None = None, title: str | None = None
 ) -> str:
-    """Create a new block in a Roam page."""
+    """Create a new block in a Roam page.
+
+    Args:
+        content: The content text for the new block.
+        page_uid: Optional UID of the page to add the block to.
+        title: Optional title of the page to add the block to.
+
+    Returns:
+        A confirmation message with the created block UID.
+    """
     try:
         roam = get_roam_client()
 
@@ -169,7 +190,7 @@ def roam_debug_daily_notes() -> str:
     """Debug function to test different daily note formats and show what exists.
 
     Returns:
-        Debug information about daily note formats and existing pages
+        Debug information about daily note formats and existing pages.
     """
     try:
         # Get singleton Roam API client
@@ -178,7 +199,6 @@ def roam_debug_daily_notes() -> str:
         # Get the detected format
         detected_format = roam.find_daily_note_format()
 
-        from datetime import datetime, timedelta
         debug_info = ["# Daily Notes Debug\n"]
         debug_info.append(f"**Detected format**: `{detected_format}`\n")
 
@@ -213,7 +233,11 @@ server = Server("mcp-roam")
 # Set up the tools
 @server.list_tools()
 async def list_tools() -> list[Tool]:
-    """Return list of available tools."""
+    """Return list of available tools.
+
+    Returns:
+        List of Tool objects describing available MCP tools.
+    """
     return [
         Tool(
             name="roam_hello_world",
@@ -245,7 +269,18 @@ async def list_tools() -> list[Tool]:
 
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[TextContent]:
-    """Handle tool calls."""
+    """Handle tool calls.
+
+    Args:
+        name: The name of the tool to call.
+        arguments: The arguments to pass to the tool.
+
+    Returns:
+        List of TextContent objects with the tool result.
+
+    Raises:
+        ValueError: If the tool name is unknown.
+    """
     match name:
         case "roam_hello_world":
             result = roam_hello_world(arguments.get("name", "World"))
@@ -271,7 +306,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
 
 
 async def serve() -> None:
-    """Main server function that initializes and runs the MCP server."""
+    """Initialize and run the MCP server.
+
+    This is the main entry point for running the server via stdio transport.
+    """
     # Initialize and run the server
     options = server.create_initialization_options()
     async with stdio_server() as (read_stream, write_stream):

@@ -30,8 +30,12 @@ __all__ = [
 
 @click.command()
 @click.option("-v", "--verbose", count=True)
-def main(verbose: bool) -> None:
-    """MCP Roam Server - Roam Research functionality for MCP."""
+def main(verbose: int) -> None:
+    """Run the MCP Roam Server.
+
+    Args:
+        verbose: Verbosity level (0=WARN, 1=INFO, 2+=DEBUG).
+    """
     import asyncio
 
     logging_level = logging.WARN
