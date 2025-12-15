@@ -802,6 +802,124 @@ class TestGetDailyNotesContext:
 
         assert "No daily notes found" in result
 
+    @patch("mcp_server_roam.roam_api.requests.post")
+    def test_get_context_empty_children(self, mock_post: MagicMock) -> None:
+        """Test context when page has empty children list."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+        api._daily_note_format = "%B %d, %Y"
+
+        # Mock page query response
+        page_query_response = MagicMock()
+        page_query_response.ok = True
+        page_query_response.is_redirect = False
+        page_query_response.status_code = 200
+        page_query_response.json.return_value = {"result": [[456]]}
+
+        # Mock page pull with empty children
+        page_pull_response = MagicMock()
+        page_pull_response.ok = True
+        page_pull_response.is_redirect = False
+        page_pull_response.status_code = 200
+        page_pull_response.json.return_value = {
+            "result": {":node/title": "December 15, 2025", ":block/children": []}
+        }
+
+        # Mock empty references
+        refs_response = MagicMock()
+        refs_response.ok = True
+        refs_response.is_redirect = False
+        refs_response.status_code = 200
+        refs_response.json.return_value = {"result": []}
+
+        mock_post.side_effect = [page_query_response, page_pull_response, refs_response]
+
+        result = api.get_daily_notes_context(days=1, max_references=10)
+
+        # Page found but no content - should return "No daily notes found"
+        assert "No daily notes found" in result
+
+    @patch("mcp_server_roam.roam_api.requests.post")
+    def test_get_context_empty_block_strings(self, mock_post: MagicMock) -> None:
+        """Test context when page has children with empty strings."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+        api._daily_note_format = "%B %d, %Y"
+
+        # Mock page query response
+        page_query_response = MagicMock()
+        page_query_response.ok = True
+        page_query_response.is_redirect = False
+        page_query_response.status_code = 200
+        page_query_response.json.return_value = {"result": [[456]]}
+
+        # Mock page with children that have empty strings
+        page_pull_response = MagicMock()
+        page_pull_response.ok = True
+        page_pull_response.is_redirect = False
+        page_pull_response.status_code = 200
+        page_pull_response.json.return_value = {
+            "result": {
+                ":node/title": "December 15, 2025",
+                ":block/children": [{":block/string": "", ":block/uid": "uid1"}],
+            }
+        }
+
+        # Mock empty references
+        refs_response = MagicMock()
+        refs_response.ok = True
+        refs_response.is_redirect = False
+        refs_response.status_code = 200
+        refs_response.json.return_value = {"result": []}
+
+        mock_post.side_effect = [page_query_response, page_pull_response, refs_response]
+
+        result = api.get_daily_notes_context(days=1, max_references=10)
+
+        # Empty strings produce no markdown, no references - no daily notes
+        assert "No daily notes found" in result
+
+    @patch("mcp_server_roam.roam_api.requests.post")
+    def test_get_context_no_references(self, mock_post: MagicMock) -> None:
+        """Test context when page has content but no references."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+        api._daily_note_format = "%B %d, %Y"
+
+        # Mock page query response
+        page_query_response = MagicMock()
+        page_query_response.ok = True
+        page_query_response.is_redirect = False
+        page_query_response.status_code = 200
+        page_query_response.json.return_value = {"result": [[456]]}
+
+        # Mock page with actual content
+        page_pull_response = MagicMock()
+        page_pull_response.ok = True
+        page_pull_response.is_redirect = False
+        page_pull_response.status_code = 200
+        page_pull_response.json.return_value = {
+            "result": {
+                ":node/title": "December 15, 2025",
+                ":block/children": [
+                    {":block/string": "Some content", ":block/uid": "uid1"}
+                ],
+            }
+        }
+
+        # Mock empty references
+        refs_response = MagicMock()
+        refs_response.ok = True
+        refs_response.is_redirect = False
+        refs_response.status_code = 200
+        refs_response.json.return_value = {"result": []}
+
+        mock_post.side_effect = [page_query_response, page_pull_response, refs_response]
+
+        result = api.get_daily_notes_context(days=1, max_references=10)
+
+        # Should have content but no references section
+        assert "Daily Notes Context" in result
+        assert "Some content" in result
+        assert "References to" not in result
+
 
 class TestProcessBlocks:
     """Tests for RoamAPI.process_blocks method."""
