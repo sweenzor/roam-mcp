@@ -481,6 +481,56 @@ class RoamAPI:
             logger.warning("Error finding references to %s: %s", page_title, e)
             return []
 
+    def search_blocks_by_text(
+        self, text: str, page_title: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Search for blocks containing text (case-sensitive substring match).
+
+        Args:
+            text: Text to search for in block content.
+            page_title: Optional page title to limit search scope.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of dicts with uid, content, page_title.
+
+        Raises:
+            AuthenticationError: If authentication fails.
+            InvalidQueryError: If input contains invalid patterns.
+        """
+        sanitized_text = self._sanitize_query_input(text)
+
+        if page_title:
+            sanitized_page = self._sanitize_query_input(page_title)
+            query = f"""[:find ?uid ?string ?page-title
+                         :where
+                         [?b :block/uid ?uid]
+                         [?b :block/string ?string]
+                         [(clojure.string/includes? ?string "{sanitized_text}")]
+                         [?b :block/page ?page]
+                         [?page :node/title ?page-title]
+                         [(= ?page-title "{sanitized_page}")]]"""
+        else:
+            query = f"""[:find ?uid ?string ?page-title
+                         :where
+                         [?b :block/uid ?uid]
+                         [?b :block/string ?string]
+                         [(clojure.string/includes? ?string "{sanitized_text}")]
+                         [?b :block/page ?page]
+                         [?page :node/title ?page-title]]"""
+
+        try:
+            results = self.run_query(query)
+            return [
+                {"uid": r[0], "content": r[1], "page_title": r[2]}
+                for r in results[:limit]
+            ]
+        except (AuthenticationError, InvalidQueryError):
+            raise
+        except RoamAPIError as e:
+            logger.warning("Error searching blocks for '%s': %s", text, e)
+            return []
+
     def get_block(self, block_uid: str) -> dict[str, Any]:
         """Get a block by its UID.
 

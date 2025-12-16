@@ -57,18 +57,24 @@ class TestE2E:
             tools = await session.list_tools()
             tool_names = {t.name for t in tools.tools}
             expected = {
-                "roam_hello_world",
-                "roam_get_page_markdown",
-                "roam_create_block",
-                "roam_context",
-                "roam_debug_daily_notes",
-                "roam_sync_index",
-                "roam_semantic_search",
+                "hello_world",
+                "get_page",
+                "create_block",
+                "daily_context",
+                "debug_daily_notes",
+                "sync_index",
+                "semantic_search",
+                "get_block_context",
+                "search_by_text",
+                "raw_query",
+                "get_backlinks",
             }
             assert expected == tool_names
 
             # Test hello_world
-            result = await session.call_tool("roam_hello_world", {"name": "E2E"})
+            result = await session.call_tool(
+                "hello_world", {"name": "E2E"}
+            )
             assert "Hello, E2E!" in result.content[0].text
 
         await run_with_session(test)
@@ -78,8 +84,8 @@ class TestE2E:
 
         async def test(session: ClientSession) -> None:
             result = await session.call_tool(
-                "roam_get_page_markdown",
-                {"title": "This Page Should Not Exist 12345xyz"},
+                "get_page",
+                {"title": "This Page Should Not Exist 12345xyz"}
             )
             text = result.content[0].text
             assert "Error" in text or "not found" in text.lower()
@@ -91,14 +97,15 @@ class TestE2E:
 
         async def test(session: ClientSession) -> None:
             # Test debug_daily_notes (detects format)
-            debug_result = await session.call_tool("roam_debug_daily_notes", {})
+            debug_result = await session.call_tool("debug_daily_notes", {})
             debug_text = debug_result.content[0].text
             assert "Daily Notes Debug" in debug_text
             assert "Detected format" in debug_text
 
-            # Test roam_context (uses cached format, fetches 1 day only)
+            # Test daily_context (uses cached format, fetches 1 day only)
             context_result = await session.call_tool(
-                "roam_context", {"days": 1, "max_references": 3}
+                "daily_context",
+                {"days": 1, "max_references": 3}
             )
             assert "Daily Notes Context" in context_result.content[0].text
 
@@ -109,7 +116,8 @@ class TestE2E:
                     if match:
                         date_str = match.group(1)
                         result = await session.call_tool(
-                            "roam_get_page_markdown", {"title": date_str}
+                            "get_page",
+                            {"title": date_str}
                         )
                         assert date_str in result.content[0].text
                         return

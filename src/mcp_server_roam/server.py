@@ -1,4 +1,5 @@
 """MCP server implementation for Roam Research API."""
+import json
 import time
 from datetime import datetime, timedelta
 
@@ -11,6 +12,7 @@ from pydantic import BaseModel
 from mcp_server_roam.embedding import EmbeddingService, get_embedding_service
 from mcp_server_roam.roam_api import (
     ORDINAL_DATE_FORMATS,
+    BlockNotFoundError,
     InvalidQueryError,
     PageNotFoundError,
     RoamAPI,
@@ -39,19 +41,19 @@ def get_roam_client() -> RoamAPI:
 
 
 # Pydantic models for tool inputs
-class RoamHelloWorld(BaseModel):
+class HelloWorld(BaseModel):
     """Input schema for hello_world tool."""
 
     name: str = "World"
 
 
-class RoamGetPageMarkdown(BaseModel):
+class GetPage(BaseModel):
     """Input schema for get_page_markdown tool."""
 
     title: str
 
 
-class RoamCreateBlock(BaseModel):
+class CreateBlock(BaseModel):
     """Input schema for create_block tool."""
 
     content: str
@@ -59,26 +61,26 @@ class RoamCreateBlock(BaseModel):
     title: str | None = None
 
 
-class RoamContext(BaseModel):
+class DailyContext(BaseModel):
     """Input schema for context tool."""
 
     days: int = 10
     max_references: int = 10
 
 
-class RoamDebugDailyNotes(BaseModel):
+class DebugDailyNotes(BaseModel):
     """Input schema for debug_daily_notes tool."""
 
     pass
 
 
-class RoamSyncIndex(BaseModel):
+class SyncIndex(BaseModel):
     """Input schema for sync_index tool."""
 
     full: bool = False
 
 
-class RoamSemanticSearch(BaseModel):
+class SemanticSearch(BaseModel):
     """Input schema for semantic_search tool."""
 
     query: str
@@ -86,8 +88,36 @@ class RoamSemanticSearch(BaseModel):
     include_context: bool = True
 
 
+class GetBlockContext(BaseModel):
+    """Input schema for get_block_context tool."""
+
+    uid: str
+
+
+class SearchByText(BaseModel):
+    """Input schema for search_by_text tool."""
+
+    text: str
+    page_title: str | None = None
+    limit: int = 20
+
+
+class RawQuery(BaseModel):
+    """Input schema for raw_query tool."""
+
+    query: str
+    args: list | None = None
+
+
+class GetBacklinks(BaseModel):
+    """Input schema for get_backlinks tool."""
+
+    page_title: str
+    limit: int = 20
+
+
 # Tool implementation functions
-def roam_hello_world(name: str = "World") -> str:
+def hello_world(name: str = "World") -> str:
     """Simple hello world tool for Roam Research MCP.
 
     Args:
@@ -99,7 +129,7 @@ def roam_hello_world(name: str = "World") -> str:
     return f"Hello, {name}! This is the Roam Research MCP server."
 
 
-def roam_get_page_markdown(title: str) -> str:
+def get_page(title: str) -> str:
     """Retrieve a page's content in clean markdown format.
 
     This uses the Roam API to fetch the page content and converts it to a well-formatted
@@ -133,7 +163,7 @@ def roam_get_page_markdown(title: str) -> str:
         return f"Error fetching page: {str(e)}"
 
 
-def roam_create_block(
+def create_block(
     content: str, page_uid: str | None = None, title: str | None = None
 ) -> str:
     """Create a new block in a Roam page.
@@ -172,7 +202,7 @@ def roam_create_block(
         return f"Error creating block: {e}"
 
 
-def roam_context(days: int = 10, max_references: int = 10) -> str:
+def daily_context(days: int = 10, max_references: int = 10) -> str:
     """Get the last N days of daily notes with their linked references for context.
 
     Args:
@@ -203,7 +233,7 @@ def roam_context(days: int = 10, max_references: int = 10) -> str:
         return f"Error fetching context: {str(e)}"
 
 
-def roam_debug_daily_notes() -> str:
+def debug_daily_notes() -> str:
     """Debug function to test different daily note formats and show what exists.
 
     Returns:
@@ -248,7 +278,7 @@ SYNC_BATCH_SIZE = 64
 SYNC_COMMIT_INTERVAL = 500
 
 
-def roam_sync_index(full: bool = False) -> str:
+def sync_index(full: bool = False) -> str:
     """Build or update the vector index for semantic search.
 
     Args:
@@ -345,7 +375,7 @@ RECENCY_BOOST_DAYS = 30
 RECENCY_BOOST_MAX = 0.1
 
 
-def roam_semantic_search(
+def semantic_search(
     query: str,
     limit: int = 10,
     include_context: bool = True,
@@ -369,7 +399,7 @@ def roam_semantic_search(
         if store.get_sync_status() == SyncStatus.NOT_INITIALIZED:
             return (
                 "Vector index not initialized. "
-                "Please run roam_sync_index first to build the search index."
+                "Please run sync_index first to build the search index."
             )
 
         # Perform incremental sync before search
@@ -481,6 +511,165 @@ def roam_semantic_search(
         return f"Unexpected error during search: {str(e)}"
 
 
+def get_block_context(uid: str) -> str:
+    """Get a block with its surrounding context.
+
+    Args:
+        uid: The UID of the block to fetch.
+
+    Returns:
+        Block content with parent chain, children, and page title.
+    """
+    try:
+        roam = get_roam_client()
+
+        # Get the block data
+        block_data = roam.get_block(uid)
+
+        # Get parent chain for context
+        parent_chain = roam.get_block_parent_chain(uid)
+
+        # Build output
+        output_lines = ["# Block Context\n"]
+
+        # Add page title if available
+        page_title = block_data.get(":node/title")
+        if page_title:
+            output_lines.append(f"**Page:** {page_title}\n")
+
+        # Add parent chain
+        if parent_chain:
+            path = " > ".join(parent_chain)
+            output_lines.append(f"**Path:** {path}\n")
+
+        # Add block content
+        content = block_data.get(":block/string", "")
+        output_lines.append(f"**Content:** {content}\n")
+        output_lines.append(f"**UID:** {uid}\n")
+
+        # Add children if present
+        children = block_data.get(":block/children", [])
+        if children:
+            output_lines.append("\n## Children\n")
+            output_lines.append(roam.process_blocks(children, 0))
+
+        return "\n".join(output_lines)
+
+    except BlockNotFoundError as e:
+        return f"Error: {str(e)}"
+    except RoamAPIError as e:
+        return f"Error fetching block: {str(e)}"
+
+
+def search_by_text(
+    text: str, page_title: str | None = None, limit: int = 20
+) -> str:
+    """Search for blocks containing text (keyword search).
+
+    Args:
+        text: Text to search for (case-sensitive substring match).
+        page_title: Optional page title to limit search scope.
+        limit: Maximum number of results to return.
+
+    Returns:
+        Formatted search results with block content and page context.
+    """
+    try:
+        roam = get_roam_client()
+        results = roam.search_blocks_by_text(text, page_title, limit)
+
+        if not results:
+            scope = f" in page '{page_title}'" if page_title else ""
+            return f"No blocks found containing '{text}'{scope}."
+
+        output_lines = [f"# Text Search Results for: {text}\n"]
+        if page_title:
+            output_lines.append(f"**Scope:** {page_title}\n")
+        output_lines.append(f"Found {len(results)} results:\n")
+
+        for i, result in enumerate(results, 1):
+            content = result["content"]
+            result_page = result.get("page_title") or "Unknown"
+
+            output_lines.append(f"## {i}. {result_page}")
+
+            # Truncate long content
+            if len(content) > 500:
+                content = content[:500] + "..."
+            output_lines.append(f"{content}")
+            output_lines.append(f"*UID: {result['uid']}*\n")
+
+        return "\n".join(output_lines)
+
+    except InvalidQueryError as e:
+        return f"Error: Invalid search text - {str(e)}"
+    except RoamAPIError as e:
+        return f"Error searching blocks: {str(e)}"
+
+
+def raw_query(query: str, args: list | None = None) -> str:
+    """Execute an arbitrary Datalog query against the Roam graph.
+
+    Args:
+        query: Datalog query string.
+        args: Optional list of query arguments.
+
+    Returns:
+        JSON-formatted query results.
+
+    Warning:
+        This is a power user tool. Malformed queries may return errors.
+    """
+    try:
+        roam = get_roam_client()
+        results = roam.run_query(query, args)
+
+        return json.dumps(results, indent=2, default=str)
+
+    except InvalidQueryError as e:
+        return f"Error: Invalid query - {str(e)}"
+    except RoamAPIError as e:
+        return f"Error executing query: {str(e)}"
+
+
+def get_backlinks(page_title: str, limit: int = 20) -> str:
+    """Get all blocks that reference a page (backlinks).
+
+    Args:
+        page_title: Title of the page to find references to.
+        limit: Maximum number of results to return.
+
+    Returns:
+        Formatted list of blocks that reference the page.
+    """
+    try:
+        roam = get_roam_client()
+        results = roam.get_references_to_page(page_title, limit)
+
+        if not results:
+            return f"No blocks found referencing '{page_title}'."
+
+        output_lines = [f"# Backlinks to: {page_title}\n"]
+        output_lines.append(f"Found {len(results)} references:\n")
+
+        for i, result in enumerate(results, 1):
+            content = result.get("string", "")
+
+            # Truncate long content
+            if len(content) > 500:
+                content = content[:500] + "..."
+            output_lines.append(f"## {i}.")
+            output_lines.append(f"{content}")
+            output_lines.append(f"*UID: {result['uid']}*\n")
+
+        return "\n".join(output_lines)
+
+    except InvalidQueryError as e:
+        return f"Error: Invalid page title - {str(e)}"
+    except RoamAPIError as e:
+        return f"Error fetching backlinks: {str(e)}"
+
+
 # Create the server instance - this is what mcp dev looks for
 server = Server("mcp-roam")
 
@@ -495,39 +684,59 @@ async def list_tools() -> list[Tool]:
     """
     return [
         Tool(
-            name="roam_hello_world",
+            name="hello_world",
             description="Simple hello world greeting from Roam MCP server",
-            inputSchema=RoamHelloWorld.model_json_schema(),
+            inputSchema=HelloWorld.model_json_schema(),
         ),
         Tool(
-            name="roam_get_page_markdown",
+            name="get_page",
             description="Retrieve a page's content in clean markdown format",
-            inputSchema=RoamGetPageMarkdown.model_json_schema(),
+            inputSchema=GetPage.model_json_schema(),
         ),
         Tool(
-            name="roam_create_block",
+            name="create_block",
             description="Add a new block to a Roam page",
-            inputSchema=RoamCreateBlock.model_json_schema(),
+            inputSchema=CreateBlock.model_json_schema(),
         ),
         Tool(
-            name="roam_context",
+            name="daily_context",
             description="Get daily notes with their linked references for context",
-            inputSchema=RoamContext.model_json_schema(),
+            inputSchema=DailyContext.model_json_schema(),
         ),
         Tool(
-            name="roam_debug_daily_notes",
+            name="debug_daily_notes",
             description="Debug daily note formats and show what daily notes exist",
-            inputSchema=RoamDebugDailyNotes.model_json_schema(),
+            inputSchema=DebugDailyNotes.model_json_schema(),
         ),
         Tool(
-            name="roam_sync_index",
+            name="sync_index",
             description="Build or update the vector index for semantic search",
-            inputSchema=RoamSyncIndex.model_json_schema(),
+            inputSchema=SyncIndex.model_json_schema(),
         ),
         Tool(
-            name="roam_semantic_search",
+            name="semantic_search",
             description="Search blocks using semantic similarity",
-            inputSchema=RoamSemanticSearch.model_json_schema(),
+            inputSchema=SemanticSearch.model_json_schema(),
+        ),
+        Tool(
+            name="get_block_context",
+            description="Get a block with its surrounding context (parent chain, children)",
+            inputSchema=GetBlockContext.model_json_schema(),
+        ),
+        Tool(
+            name="search_by_text",
+            description="Search blocks by text (keyword/substring search)",
+            inputSchema=SearchByText.model_json_schema(),
+        ),
+        Tool(
+            name="raw_query",
+            description="Execute arbitrary Datalog queries (power user tool)",
+            inputSchema=RawQuery.model_json_schema(),
+        ),
+        Tool(
+            name="get_backlinks",
+            description="Get all blocks that reference a page",
+            inputSchema=GetBacklinks.model_json_schema(),
         ),
     ]
 
@@ -547,27 +756,48 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         ValueError: If the tool name is unknown.
     """
     match name:
-        case "roam_hello_world":
-            result = roam_hello_world(arguments.get("name", "World"))
-        case "roam_get_page_markdown":
-            result = roam_get_page_markdown(arguments["title"])
-        case "roam_create_block":
-            result = roam_create_block(
-                arguments["content"], arguments.get("page_uid"), arguments.get("title")
+        case "hello_world":
+            result = hello_world(arguments.get("name", "World"))
+        case "get_page":
+            result = get_page(arguments["title"])
+        case "create_block":
+            result = create_block(
+                arguments["content"],
+                arguments.get("page_uid"),
+                arguments.get("title")
             )
-        case "roam_context":
-            result = roam_context(
-                arguments.get("days", 10), arguments.get("max_references", 10)
+        case "daily_context":
+            result = daily_context(
+                arguments.get("days", 10),
+                arguments.get("max_references", 10)
             )
-        case "roam_debug_daily_notes":
-            result = roam_debug_daily_notes()
-        case "roam_sync_index":
-            result = roam_sync_index(arguments.get("full", False))
-        case "roam_semantic_search":
-            result = roam_semantic_search(
+        case "debug_daily_notes":
+            result = debug_daily_notes()
+        case "sync_index":
+            result = sync_index(arguments.get("full", False))
+        case "semantic_search":
+            result = semantic_search(
                 arguments["query"],
                 arguments.get("limit", 10),
                 arguments.get("include_context", True),
+            )
+        case "get_block_context":
+            result = get_block_context(arguments["uid"])
+        case "search_by_text":
+            result = search_by_text(
+                arguments["text"],
+                arguments.get("page_title"),
+                arguments.get("limit", 20),
+            )
+        case "raw_query":
+            result = raw_query(
+                arguments["query"],
+                arguments.get("args"),
+            )
+        case "get_backlinks":
+            result = get_backlinks(
+                arguments["page_title"],
+                arguments.get("limit", 20),
             )
         case _:
             raise ValueError(f"Unknown tool: {name}")

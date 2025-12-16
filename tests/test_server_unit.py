@@ -11,23 +11,28 @@ from pytest_mock import MockerFixture
 
 from mcp_server_roam.roam_api import (
     AuthenticationError,
+    BlockNotFoundError,
     InvalidQueryError,
     PageNotFoundError,
     RoamAPIError,
 )
 from mcp_server_roam.server import (
     call_tool,
+    create_block,
+    daily_context,
+    debug_daily_notes,
+    get_backlinks,
+    get_block_context,
+    get_page,
     get_roam_client,
+    hello_world,
     list_tools,
-    roam_context,
-    roam_create_block,
-    roam_debug_daily_notes,
-    roam_get_page_markdown,
-    roam_hello_world,
-    roam_semantic_search,
-    roam_sync_index,
+    raw_query,
+    search_by_text,
+    semantic_search,
     serve,
     server,
+    sync_index,
 )
 from mcp_server_roam.vector_store import SyncStatus
 
@@ -99,29 +104,29 @@ def mock_page_data_empty() -> dict[str, Any]:
     }
 
 
-# Tests for roam_hello_world
+# Tests for hello_world
 class TestRoamHelloWorld:
     """Tests for the simple hello world function."""
 
     def test_hello_world_default(self) -> None:
         """Test hello world with default parameter."""
-        result = roam_hello_world()
+        result = hello_world()
         assert "Hello, World!" in result
         assert "Roam Research MCP server" in result
 
     def test_hello_world_custom_name(self) -> None:
         """Test hello world with custom name parameter."""
-        result = roam_hello_world("Claude")
+        result = hello_world("Claude")
         assert "Hello, Claude!" in result
         assert "Roam Research MCP server" in result
 
     def test_hello_world_empty_name(self) -> None:
         """Test hello world with empty string name."""
-        result = roam_hello_world("")
+        result = hello_world("")
         assert "Hello, !" in result
 
 
-# Tests for roam_get_page_markdown
+# Tests for get_page
 class TestRoamGetPageMarkdown:
     """Tests for fetching page content as markdown."""
 
@@ -137,7 +142,7 @@ class TestRoamGetPageMarkdown:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Test Page")
+        result = get_page("Test Page")
 
         mock_roam_instance.get_page.assert_called_once_with("Test Page")
         assert "# Test Page\n\n" in result
@@ -160,7 +165,7 @@ class TestRoamGetPageMarkdown:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Nested Page")
+        result = get_page("Nested Page")
 
         assert "# Nested Page\n\n" in result
         assert "- Top level block\n" in result
@@ -179,7 +184,7 @@ class TestRoamGetPageMarkdown:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Empty Page")
+        result = get_page("Empty Page")
 
         assert result == "# Empty Page\n\n"
 
@@ -193,7 +198,7 @@ class TestRoamGetPageMarkdown:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("No Children Key")
+        result = get_page("No Children Key")
 
         assert result == "# No Children Key\n\n"
         mock_roam_instance.process_blocks.assert_not_called()
@@ -201,7 +206,7 @@ class TestRoamGetPageMarkdown:
 
 # Tests for error handling
 class TestRoamGetPageMarkdownErrors:
-    """Tests for error handling in roam_get_page_markdown."""
+    """Tests for error handling in get_page."""
 
     def test_get_page_markdown_page_not_found(self, mocker: MockerFixture) -> None:
         """Test error handling when page is not found."""
@@ -212,7 +217,7 @@ class TestRoamGetPageMarkdownErrors:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Nonexistent Page")
+        result = get_page("Nonexistent Page")
 
         assert "Error:" in result
         assert "not found" in result
@@ -225,7 +230,7 @@ class TestRoamGetPageMarkdownErrors:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Test Page")
+        result = get_page("Test Page")
 
         assert "Error fetching page:" in result
         assert "API connection failed" in result
@@ -241,7 +246,7 @@ class TestRoamGetPageMarkdownErrors:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Test Page")
+        result = get_page("Test Page")
 
         assert "Error fetching page:" in result
         assert "Authentication error" in result
@@ -257,7 +262,7 @@ class TestRoamGetPageMarkdownErrors:
             ),
         )
 
-        result = roam_get_page_markdown("Test Page")
+        result = get_page("Test Page")
 
         assert "Error fetching page:" in result
         assert "Failed to initialize RoamAPI client" in result
@@ -303,7 +308,7 @@ class TestRoamGetPageMarkdownIntegration:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Project Planning")
+        result = get_page("Project Planning")
 
         assert "# Project Planning\n\n" in result
         assert "- Project goals\n" in result
@@ -353,7 +358,7 @@ class TestRoamGetPageMarkdownIntegration:
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_get_page_markdown("Deep Nesting")
+        result = get_page("Deep Nesting")
 
         assert "- Level 1\n" in result
         assert "  - Level 2\n" in result
@@ -401,9 +406,9 @@ class TestGetRoamClient:
         mock_roam_class.assert_called_once()
 
 
-# Tests for roam_create_block
+# Tests for create_block
 class TestRoamCreateBlock:
-    """Tests for roam_create_block function."""
+    """Tests for create_block function."""
 
     def test_create_block_page_not_found(self, mocker: MockerFixture) -> None:
         """Test error when page title is provided but page not found."""
@@ -411,7 +416,7 @@ class TestRoamCreateBlock:
         mock_roam_instance.run_query.return_value = []  # No results
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_create_block("Test content", title="NonexistentPage")
+        result = create_block("Test content", title="NonexistentPage")
 
         assert "Error:" in result
         assert "NonexistentPage" in result
@@ -423,7 +428,7 @@ class TestRoamCreateBlock:
         mock_roam_instance.create_block.side_effect = RoamAPIError("API Error")
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_create_block("Test content", page_uid="page-uid")
+        result = create_block("Test content", page_uid="page-uid")
 
         assert "Error creating block:" in result
         assert "API Error" in result
@@ -437,49 +442,49 @@ class TestRoamCreateBlock:
         )
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_create_block("Test content", title="[:find ?e :where ...")
+        result = create_block("Test content", title="[:find ?e :where ...")
 
         assert "Error: Invalid input" in result
         assert "suspicious pattern" in result
 
 
-# Tests for roam_context
+# Tests for daily_context
 class TestRoamContext:
-    """Tests for roam_context function."""
+    """Tests for daily_context function."""
 
     def test_context_invalid_days_zero(self) -> None:
         """Test error for days parameter < 1."""
-        result = roam_context(days=0)
+        result = daily_context(days=0)
         assert "Error:" in result
         assert "days" in result.lower()
 
     def test_context_invalid_days_negative(self) -> None:
         """Test error for negative days parameter."""
-        result = roam_context(days=-1)
+        result = daily_context(days=-1)
         assert "Error:" in result
         assert "days" in result.lower()
 
     def test_context_invalid_days_too_large(self) -> None:
         """Test error for days parameter > 30."""
-        result = roam_context(days=31)
+        result = daily_context(days=31)
         assert "Error:" in result
         assert "days" in result.lower()
 
     def test_context_invalid_max_references_zero(self) -> None:
         """Test error for max_references parameter < 1."""
-        result = roam_context(days=10, max_references=0)
+        result = daily_context(days=10, max_references=0)
         assert "Error:" in result
         assert "max_references" in result.lower()
 
     def test_context_invalid_max_references_negative(self) -> None:
         """Test error for negative max_references parameter."""
-        result = roam_context(days=10, max_references=-1)
+        result = daily_context(days=10, max_references=-1)
         assert "Error:" in result
         assert "max_references" in result.lower()
 
     def test_context_invalid_max_references_too_large(self) -> None:
         """Test error for max_references parameter > 100."""
-        result = roam_context(days=10, max_references=101)
+        result = daily_context(days=10, max_references=101)
         assert "Error:" in result
         assert "max_references" in result.lower()
 
@@ -489,7 +494,7 @@ class TestRoamContext:
         mock_roam_instance.get_daily_notes_context.return_value = "# Daily Notes"
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_context(days=5, max_references=10)
+        result = daily_context(days=5, max_references=10)
 
         assert result == "# Daily Notes"
         mock_roam_instance.get_daily_notes_context.assert_called_once_with(5, 10)
@@ -502,15 +507,15 @@ class TestRoamContext:
         )
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_context(days=5, max_references=10)
+        result = daily_context(days=5, max_references=10)
 
         assert "Error fetching context:" in result
         assert "API Error" in result
 
 
-# Tests for roam_debug_daily_notes
+# Tests for debug_daily_notes
 class TestRoamDebugDailyNotes:
-    """Tests for roam_debug_daily_notes function."""
+    """Tests for debug_daily_notes function."""
 
     def test_debug_daily_notes_success(self, mocker: MockerFixture) -> None:
         """Test successful debug output."""
@@ -521,7 +526,7 @@ class TestRoamDebugDailyNotes:
         }
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_debug_daily_notes()
+        result = debug_daily_notes()
 
         assert "Daily Notes Debug" in result
         assert "Detected format" in result
@@ -534,7 +539,7 @@ class TestRoamDebugDailyNotes:
         mock_roam_instance.get_page.side_effect = PageNotFoundError("Not found")
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_debug_daily_notes()
+        result = debug_daily_notes()
 
         assert "Daily Notes Debug" in result
         assert "Not found" in result
@@ -548,7 +553,7 @@ class TestRoamDebugDailyNotes:
         mock_roam_instance.get_page.side_effect = RoamAPIError("API Error")
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_debug_daily_notes()
+        result = debug_daily_notes()
 
         assert "Daily Notes Debug" in result
         assert "API Error" in result
@@ -561,7 +566,7 @@ class TestRoamDebugDailyNotes:
         )
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_debug_daily_notes()
+        result = debug_daily_notes()
 
         assert "Error:" in result
         assert "API Error" in result
@@ -575,15 +580,15 @@ class TestRoamDebugDailyNotes:
         }
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = roam_debug_daily_notes()
+        result = debug_daily_notes()
 
         assert "Daily Notes Debug" in result
         assert "%B %dth, %Y" in result
 
 
-# Tests for roam_sync_index
+# Tests for sync_index
 class TestRoamSyncIndex:
-    """Tests for roam_sync_index function."""
+    """Tests for sync_index function."""
 
     def test_sync_index_full_sync(self, mocker: MockerFixture) -> None:
         """Test full sync when explicitly requested."""
@@ -609,7 +614,7 @@ class TestRoamSyncIndex:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_sync_index(full=True)
+        result = sync_index(full=True)
 
         assert "Full sync completed" in result
         mock_store.drop_all_data.assert_called_once()
@@ -640,7 +645,7 @@ class TestRoamSyncIndex:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_sync_index(full=False)
+        result = sync_index(full=False)
 
         assert "Incremental sync completed" in result
         mock_roam.get_blocks_modified_since.assert_called_once_with(1000)
@@ -661,7 +666,7 @@ class TestRoamSyncIndex:
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
-        result = roam_sync_index(full=False)
+        result = sync_index(full=False)
 
         assert "No blocks to sync" in result
 
@@ -689,7 +694,7 @@ class TestRoamSyncIndex:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_sync_index(full=False)
+        result = sync_index(full=False)
 
         assert "Full sync completed" in result
         mock_store.drop_all_data.assert_called_once()
@@ -709,7 +714,7 @@ class TestRoamSyncIndex:
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
-        result = roam_sync_index(full=True)
+        result = sync_index(full=True)
 
         assert "Error during sync" in result
         assert "API Error" in result
@@ -729,7 +734,7 @@ class TestRoamSyncIndex:
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
-        result = roam_sync_index(full=True)
+        result = sync_index(full=True)
 
         assert "Unexpected error" in result
 
@@ -758,15 +763,15 @@ class TestRoamSyncIndex:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_sync_index(full=False)
+        result = sync_index(full=False)
 
         # Should do full sync since no timestamp
         mock_roam.get_all_blocks_for_sync.assert_called_once()
 
 
-# Tests for roam_semantic_search
+# Tests for semantic_search
 class TestRoamSemanticSearch:
-    """Tests for roam_semantic_search function."""
+    """Tests for semantic_search function."""
 
     def test_search_not_initialized(self, mocker: MockerFixture) -> None:
         """Test search returns message when index not initialized."""
@@ -782,10 +787,10 @@ class TestRoamSemanticSearch:
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
-        result = roam_semantic_search("test query")
+        result = semantic_search("test query")
 
         assert "not initialized" in result.lower()
-        assert "roam_sync_index" in result
+        assert "sync_index" in result
 
     def test_search_with_results(self, mocker: MockerFixture) -> None:
         """Test search returns formatted results."""
@@ -823,7 +828,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("test query")
+        result = semantic_search("test query")
 
         assert "Search Results" in result
         assert "Test Page" in result
@@ -853,7 +858,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("obscure query")
+        result = semantic_search("obscure query")
 
         assert "No results found" in result
 
@@ -896,7 +901,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("test")
+        result = semantic_search("test")
 
         # Should have synced the new block
         mock_store.upsert_blocks.assert_called_once()
@@ -937,7 +942,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("test", include_context=False)
+        result = semantic_search("test", include_context=False)
 
         # Should not fetch parent chain
         mock_roam.get_block_parent_chain.assert_not_called()
@@ -957,7 +962,7 @@ class TestRoamSemanticSearch:
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
-        result = roam_semantic_search("test")
+        result = semantic_search("test")
 
         assert "Error during search" in result
 
@@ -976,7 +981,7 @@ class TestRoamSemanticSearch:
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
-        result = roam_semantic_search("test")
+        result = semantic_search("test")
 
         assert "Unexpected error" in result
 
@@ -1016,7 +1021,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("test")
+        result = semantic_search("test")
 
         # Content should be truncated
         assert "..." in result
@@ -1058,7 +1063,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("test")
+        result = semantic_search("test")
 
         # Should not try to get modified blocks
         mock_roam.get_blocks_modified_since.assert_not_called()
@@ -1102,7 +1107,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("test")
+        result = semantic_search("test")
 
         assert "Search Results" in result
 
@@ -1140,7 +1145,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = roam_semantic_search("test", include_context=True)
+        result = semantic_search("test", include_context=True)
 
         # Should not fetch parent chain since it already exists
         mock_roam.get_block_parent_chain.assert_not_called()
@@ -1154,7 +1159,7 @@ class TestCallTool:
     @pytest.mark.asyncio
     async def test_call_tool_hello_world(self) -> None:
         """Test call_tool handles hello_world."""
-        result = await call_tool("roam_hello_world", {"name": "Test"})
+        result = await call_tool("hello_world", {"name": "Test"})
 
         assert len(result) == 1
         assert result[0].type == "text"
@@ -1163,7 +1168,7 @@ class TestCallTool:
     @pytest.mark.asyncio
     async def test_call_tool_hello_world_default(self) -> None:
         """Test call_tool handles hello_world with default name."""
-        result = await call_tool("roam_hello_world", {})
+        result = await call_tool("hello_world", {})
 
         assert len(result) == 1
         assert "Hello, World!" in result[0].text
@@ -1176,7 +1181,7 @@ class TestCallTool:
         mock_roam_instance.process_blocks.return_value = ""
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = await call_tool("roam_get_page_markdown", {"title": "Test Page"})
+        result = await call_tool("get_page", {"title": "Test Page"})
 
         assert len(result) == 1
         assert "Test Page" in result[0].text
@@ -1189,7 +1194,7 @@ class TestCallTool:
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
         result = await call_tool(
-            "roam_create_block", {"content": "Test", "page_uid": "page123"}
+            "create_block", {"content": "Test", "page_uid": "page123"}
         )
 
         assert len(result) == 1
@@ -1202,7 +1207,7 @@ class TestCallTool:
         mock_roam_instance.get_daily_notes_context.return_value = "# Daily Notes"
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = await call_tool("roam_context", {"days": 5, "max_references": 10})
+        result = await call_tool("daily_context", {"days": 5, "max_references": 10})
 
         assert len(result) == 1
         assert "Daily Notes" in result[0].text
@@ -1215,7 +1220,7 @@ class TestCallTool:
         mock_roam_instance.get_page.return_value = {":block/children": []}
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
-        result = await call_tool("roam_debug_daily_notes", {})
+        result = await call_tool("debug_daily_notes", {})
 
         assert len(result) == 1
         assert "Daily Notes Debug" in result[0].text
@@ -1224,11 +1229,11 @@ class TestCallTool:
     async def test_call_tool_sync_index(self, mocker: MockerFixture) -> None:
         """Test call_tool handles sync_index."""
         mock_sync = mocker.patch(
-            "mcp_server_roam.server.roam_sync_index",
+            "mcp_server_roam.server.sync_index",
             return_value="Sync completed",
         )
 
-        result = await call_tool("roam_sync_index", {"full": True})
+        result = await call_tool("sync_index", {"full": True})
 
         assert len(result) == 1
         assert "Sync completed" in result[0].text
@@ -1238,11 +1243,11 @@ class TestCallTool:
     async def test_call_tool_sync_index_default(self, mocker: MockerFixture) -> None:
         """Test call_tool handles sync_index with default args."""
         mock_sync = mocker.patch(
-            "mcp_server_roam.server.roam_sync_index",
+            "mcp_server_roam.server.sync_index",
             return_value="Sync completed",
         )
 
-        result = await call_tool("roam_sync_index", {})
+        result = await call_tool("sync_index", {})
 
         assert len(result) == 1
         mock_sync.assert_called_once_with(False)
@@ -1251,12 +1256,12 @@ class TestCallTool:
     async def test_call_tool_semantic_search(self, mocker: MockerFixture) -> None:
         """Test call_tool handles semantic_search."""
         mock_search = mocker.patch(
-            "mcp_server_roam.server.roam_semantic_search",
+            "mcp_server_roam.server.semantic_search",
             return_value="Search results",
         )
 
         result = await call_tool(
-            "roam_semantic_search",
+            "semantic_search",
             {"query": "test", "limit": 5, "include_context": False},
         )
 
@@ -1270,14 +1275,118 @@ class TestCallTool:
     ) -> None:
         """Test call_tool handles semantic_search with default args."""
         mock_search = mocker.patch(
-            "mcp_server_roam.server.roam_semantic_search",
+            "mcp_server_roam.server.semantic_search",
             return_value="Search results",
         )
 
-        result = await call_tool("roam_semantic_search", {"query": "test"})
+        result = await call_tool("semantic_search", {"query": "test"})
 
         assert len(result) == 1
         mock_search.assert_called_once_with("test", 10, True)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_get_block_context(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles get_block_context."""
+        mock_get_block = mocker.patch(
+            "mcp_server_roam.server.get_block_context",
+            return_value="Block context",
+        )
+
+        result = await call_tool("get_block_context", {"uid": "test-uid"})
+
+        assert len(result) == 1
+        assert "Block context" in result[0].text
+        mock_get_block.assert_called_once_with("test-uid")
+
+    @pytest.mark.asyncio
+    async def test_call_tool_search_by_text(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles search_by_text."""
+        mock_search = mocker.patch(
+            "mcp_server_roam.server.search_by_text",
+            return_value="Search results",
+        )
+
+        result = await call_tool(
+            "search_by_text",
+            {"text": "query", "page_title": "Page", "limit": 10},
+        )
+
+        assert len(result) == 1
+        assert "Search results" in result[0].text
+        mock_search.assert_called_once_with("query", "Page", 10)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_search_by_text_defaults(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test call_tool handles search_by_text with defaults."""
+        mock_search = mocker.patch(
+            "mcp_server_roam.server.search_by_text",
+            return_value="Search results",
+        )
+
+        result = await call_tool("search_by_text", {"text": "query"})
+
+        mock_search.assert_called_once_with("query", None, 20)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_raw_query(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles raw_query."""
+        mock_query = mocker.patch(
+            "mcp_server_roam.server.raw_query",
+            return_value='[["result"]]',
+        )
+
+        result = await call_tool(
+            "raw_query",
+            {"query": "[:find ?e]", "args": ["arg1"]},
+        )
+
+        assert len(result) == 1
+        mock_query.assert_called_once_with("[:find ?e]", ["arg1"])
+
+    @pytest.mark.asyncio
+    async def test_call_tool_raw_query_defaults(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles raw_query with defaults."""
+        mock_query = mocker.patch(
+            "mcp_server_roam.server.raw_query",
+            return_value="[]",
+        )
+
+        result = await call_tool("raw_query", {"query": "[:find ?e]"})
+
+        mock_query.assert_called_once_with("[:find ?e]", None)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_get_backlinks(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles get_backlinks."""
+        mock_backlinks = mocker.patch(
+            "mcp_server_roam.server.get_backlinks",
+            return_value="Backlinks",
+        )
+
+        result = await call_tool(
+            "get_backlinks",
+            {"page_title": "Test Page", "limit": 10},
+        )
+
+        assert len(result) == 1
+        assert "Backlinks" in result[0].text
+        mock_backlinks.assert_called_once_with("Test Page", 10)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_get_backlinks_defaults(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test call_tool handles get_backlinks with defaults."""
+        mock_backlinks = mocker.patch(
+            "mcp_server_roam.server.get_backlinks",
+            return_value="Backlinks",
+        )
+
+        result = await call_tool("get_backlinks", {"page_title": "Page"})
+
+        mock_backlinks.assert_called_once_with("Page", 20)
 
     @pytest.mark.asyncio
     async def test_call_tool_unknown_tool(self) -> None:
@@ -1297,14 +1406,18 @@ class TestListTools:
         tools = await list_tools()
 
         tool_names = [tool.name for tool in tools]
-        assert "roam_hello_world" in tool_names
-        assert "roam_get_page_markdown" in tool_names
-        assert "roam_create_block" in tool_names
-        assert "roam_context" in tool_names
-        assert "roam_debug_daily_notes" in tool_names
-        assert "roam_sync_index" in tool_names
-        assert "roam_semantic_search" in tool_names
-        assert len(tools) == 7
+        assert "hello_world" in tool_names
+        assert "get_page" in tool_names
+        assert "create_block" in tool_names
+        assert "daily_context" in tool_names
+        assert "debug_daily_notes" in tool_names
+        assert "sync_index" in tool_names
+        assert "semantic_search" in tool_names
+        assert "get_block_context" in tool_names
+        assert "search_by_text" in tool_names
+        assert "raw_query" in tool_names
+        assert "get_backlinks" in tool_names
+        assert len(tools) == 11
 
 
 # Tests for serve function
@@ -1335,3 +1448,331 @@ class TestServe:
         call_args = mock_run.call_args
         assert call_args[0][0] == mock_read_stream
         assert call_args[0][1] == mock_write_stream
+
+
+# Tests for get_block_context
+class TestGetBlockContext:
+    """Tests for get_block_context tool."""
+
+    def test_get_block_context_success(self, mocker: MockerFixture) -> None:
+        """Test successful block context retrieval."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_block.return_value = {
+            ":block/string": "Test block content",
+            ":block/children": [
+                {":block/string": "Child 1"},
+                {":block/string": "Child 2"},
+            ],
+        }
+        mock_roam.get_block_parent_chain.return_value = ["Parent 1", "Parent 2"]
+        mock_roam.process_blocks.return_value = "- Child 1\n- Child 2\n"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_block_context("test-uid")
+
+        assert "Block Context" in result
+        assert "Test block content" in result
+        assert "Parent 1 > Parent 2" in result
+        assert "Children" in result
+        mock_roam.get_block.assert_called_once_with("test-uid")
+        mock_roam.get_block_parent_chain.assert_called_once_with("test-uid")
+
+    def test_get_block_context_no_parent_chain(self, mocker: MockerFixture) -> None:
+        """Test block context without parent chain."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_block.return_value = {
+            ":block/string": "Root block",
+        }
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_block_context("root-uid")
+
+        assert "Root block" in result
+        assert "Path:" not in result
+
+    def test_get_block_context_not_found(self, mocker: MockerFixture) -> None:
+        """Test block not found error."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_block.side_effect = BlockNotFoundError("Block not found")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_block_context("nonexistent")
+
+        assert "Error" in result
+        assert "not found" in result.lower()
+
+    def test_get_block_context_api_error(self, mocker: MockerFixture) -> None:
+        """Test API error handling."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_block.side_effect = RoamAPIError("API Error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_block_context("test-uid")
+
+        assert "Error" in result
+        assert "fetching block" in result.lower()
+
+    def test_get_block_context_with_page_title(self, mocker: MockerFixture) -> None:
+        """Test block context when block has a page title (is a page)."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_block.return_value = {
+            ":block/string": "Page content",
+            ":node/title": "My Page Title",
+        }
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_block_context("page-uid")
+
+        assert "My Page Title" in result
+        assert "Page:" in result
+
+
+# Tests for search_by_text
+class TestSearchByText:
+    """Tests for search_by_text tool."""
+
+    def test_search_by_text_success(self, mocker: MockerFixture) -> None:
+        """Test successful text search."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.search_blocks_by_text.return_value = [
+            {"uid": "uid1", "content": "First match", "page_title": "Page 1"},
+            {"uid": "uid2", "content": "Second match", "page_title": "Page 2"},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = search_by_text("test query")
+
+        assert "Text Search Results" in result
+        assert "test query" in result
+        assert "First match" in result
+        assert "Second match" in result
+        assert "Page 1" in result
+        mock_roam.search_blocks_by_text.assert_called_once_with(
+            "test query", None, 20
+        )
+
+    def test_search_by_text_with_page_filter(self, mocker: MockerFixture) -> None:
+        """Test text search with page filter."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.search_blocks_by_text.return_value = [
+            {"uid": "uid1", "content": "Filtered match", "page_title": "Specific Page"},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = search_by_text("query", page_title="Specific Page", limit=10)
+
+        assert "Filtered match" in result
+        assert "Scope:" in result
+        assert "Specific Page" in result
+        mock_roam.search_blocks_by_text.assert_called_once_with(
+            "query", "Specific Page", 10
+        )
+
+    def test_search_by_text_no_results(self, mocker: MockerFixture) -> None:
+        """Test text search with no results."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.search_blocks_by_text.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = search_by_text("nonexistent")
+
+        assert "No blocks found" in result
+        assert "nonexistent" in result
+
+    def test_search_by_text_no_results_with_page(self, mocker: MockerFixture) -> None:
+        """Test text search with no results in specific page."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.search_blocks_by_text.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = search_by_text("query", page_title="Empty Page")
+
+        assert "No blocks found" in result
+        assert "in page 'Empty Page'" in result
+
+    def test_search_by_text_invalid_query(self, mocker: MockerFixture) -> None:
+        """Test invalid query error."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.search_blocks_by_text.side_effect = InvalidQueryError("Invalid")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = search_by_text("[:find")
+
+        assert "Error" in result
+        assert "Invalid" in result
+
+    def test_search_by_text_api_error(self, mocker: MockerFixture) -> None:
+        """Test API error handling."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.search_blocks_by_text.side_effect = RoamAPIError("Server error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = search_by_text("query")
+
+        assert "Error" in result
+        assert "searching blocks" in result.lower()
+
+    def test_search_by_text_truncates_long_content(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test long content is truncated."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.search_blocks_by_text.return_value = [
+            {"uid": "uid1", "content": "x" * 600, "page_title": "Page"},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = search_by_text("query")
+
+        assert "..." in result
+        assert len(result) < 700
+
+
+# Tests for raw_query
+class TestRawQuery:
+    """Tests for raw_query tool."""
+
+    def test_raw_query_success(self, mocker: MockerFixture) -> None:
+        """Test successful raw query."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.run_query.return_value = [
+            ["uid1", "content1"],
+            ["uid2", "content2"],
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = raw_query("[:find ?e :where [?e :block/uid]]")
+
+        assert "uid1" in result
+        assert "content1" in result
+        mock_roam.run_query.assert_called_once_with(
+            "[:find ?e :where [?e :block/uid]]", None
+        )
+
+    def test_raw_query_with_args(self, mocker: MockerFixture) -> None:
+        """Test raw query with arguments."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.run_query.return_value = [["result"]]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = raw_query("[:find ?e :in $ ?title :where [?e :node/title ?title]]",
+                          args=["Test Page"])
+
+        mock_roam.run_query.assert_called_once_with(
+            "[:find ?e :in $ ?title :where [?e :node/title ?title]]",
+            ["Test Page"]
+        )
+
+    def test_raw_query_empty_results(self, mocker: MockerFixture) -> None:
+        """Test raw query with empty results."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.run_query.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = raw_query("[:find ?e :where [?e :nonexistent/attr]]")
+
+        assert result == "[]"
+
+    def test_raw_query_invalid(self, mocker: MockerFixture) -> None:
+        """Test invalid query error."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.run_query.side_effect = InvalidQueryError("Syntax error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = raw_query("invalid query")
+
+        assert "Error" in result
+        assert "Invalid query" in result
+
+    def test_raw_query_api_error(self, mocker: MockerFixture) -> None:
+        """Test API error handling."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.run_query.side_effect = RoamAPIError("Server error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = raw_query("[:find ?e]")
+
+        assert "Error" in result
+        assert "executing query" in result.lower()
+
+
+# Tests for get_backlinks
+class TestGetBacklinks:
+    """Tests for get_backlinks tool."""
+
+    def test_get_backlinks_success(self, mocker: MockerFixture) -> None:
+        """Test successful backlinks retrieval."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_references_to_page.return_value = [
+            {"uid": "uid1", "string": "Reference to [[Test Page]]"},
+            {"uid": "uid2", "string": "Another [[Test Page]] mention"},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_backlinks("Test Page")
+
+        assert "Backlinks to: Test Page" in result
+        assert "Reference to" in result
+        assert "Another" in result
+        mock_roam.get_references_to_page.assert_called_once_with("Test Page", 20)
+
+    def test_get_backlinks_custom_limit(self, mocker: MockerFixture) -> None:
+        """Test backlinks with custom limit."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_references_to_page.return_value = [
+            {"uid": "uid1", "string": "Single ref"},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_backlinks("Page", limit=5)
+
+        mock_roam.get_references_to_page.assert_called_once_with("Page", 5)
+
+    def test_get_backlinks_no_results(self, mocker: MockerFixture) -> None:
+        """Test backlinks with no results."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_references_to_page.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_backlinks("Isolated Page")
+
+        assert "No blocks found referencing" in result
+        assert "Isolated Page" in result
+
+    def test_get_backlinks_invalid_page(self, mocker: MockerFixture) -> None:
+        """Test invalid page title error."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_references_to_page.side_effect = InvalidQueryError("Invalid")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_backlinks("[:find")
+
+        assert "Error" in result
+        assert "Invalid page title" in result
+
+    def test_get_backlinks_api_error(self, mocker: MockerFixture) -> None:
+        """Test API error handling."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_references_to_page.side_effect = RoamAPIError("API Error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_backlinks("Test Page")
+
+        assert "Error" in result
+        assert "fetching backlinks" in result.lower()
+
+    def test_get_backlinks_truncates_long_content(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test long content is truncated."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_references_to_page.return_value = [
+            {"uid": "uid1", "string": "x" * 600},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = get_backlinks("Page")
+
+        assert "..." in result

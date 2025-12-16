@@ -97,38 +97,38 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 ## Key Tool Implementations
 Currently implemented tools:
 
-1. `roam_hello_world`: Simple greeting tool for testing
+1. `hello_world`: Simple greeting tool for testing
    - Input: name (optional)
    - Output: Hello message
 
-2. `roam_get_page_markdown`: Retrieve page content in clean markdown format
+2. `get_page`: Retrieve page content in clean markdown format
    - Input: page title
    - Output: Markdown representation with properly indented blocks
    - Recursively handles blocks at any nesting depth
 
-3. `roam_create_block`: Add blocks to pages or under parent blocks
+3. `create_block`: Add blocks to pages or under parent blocks
    - Input: content text, optional page uid or title
    - Output: Confirmation message with block UID
 
-4. `roam_context`: Get daily notes with their backlinks for comprehensive context
+4. `daily_context`: Get daily notes with their backlinks for comprehensive context
    - Input: days (default: 10), max_references (default: 10)
    - Output: Markdown with daily note content + blocks that reference each daily note
    - Auto-detects daily note formats (June 13th, 2025 vs 06-13-2025 etc.)
    - Memory optimized with configurable limits
 
-5. `roam_debug_daily_notes`: Debug tool for daily note format detection
+5. `debug_daily_notes`: Debug tool for daily note format detection
    - Input: none
    - Output: Shows detected daily note format and tests recent daily notes
    - Useful for troubleshooting date format issues
 
-6. `roam_sync_index`: Build or update the vector index for semantic search
+6. `sync_index`: Build or update the vector index for semantic search
    - Input: full (bool, default: False) - if True, rebuilds entire index
    - Output: Status message with sync statistics
    - Stores embeddings in `~/.roam-mcp/{graph_name}_vectors.db`
    - Uses all-MiniLM-L6-v2 model (384 dimensions)
    - Supports incremental updates (only new/modified blocks)
 
-7. `roam_semantic_search`: Search blocks using vector similarity
+7. `semantic_search`: Search blocks using vector similarity
    - Input: query (string), limit (int, default: 10), include_context (bool, default: True)
    - Output: Formatted search results with similarity scores and context
    - Performs incremental sync before each search to capture recent changes
@@ -136,20 +136,36 @@ Currently implemented tools:
    - Returns parent chain context for each result
    - Minimum similarity threshold of 0.3
 
+8. `get_block_context`: Get a block with its surrounding context
+   - Input: uid (block UID)
+   - Output: Block content with page title, parent chain, and nested children
+
+9. `search_by_text`: Keyword/substring search (non-semantic)
+   - Input: text (search string), page_title (optional), limit (default: 20)
+   - Output: Matching blocks with UID, content, and page title
+   - Case-sensitive substring matching using Datalog
+
+10. `raw_query`: Execute arbitrary Datalog queries (power user tool)
+    - Input: query (Datalog query string), args (optional list)
+    - Output: Raw JSON results
+    - Use with caution - allows direct database access
+
+11. `get_backlinks`: Get all blocks that reference a page
+    - Input: page_title, limit (default: 20)
+    - Output: List of blocks with UID, content, and source page title
+
 Future tools to consider:
-- `roam_create_page`: Create new pages with optional content
-- `roam_import_markdown`: Import nested markdown content
-- `roam_add_todo`: Add todo items to daily pages
-- `roam_search_by_text`: Search blocks by text content
-- `roam_search_for_tag`: Search for blocks with specific tags
-- `roam_update_block`: Update block content
-- `roam_delete_block`: Delete blocks by UID
-- `roam_datomic_query`: Execute custom Datalog queries on the Roam graph
-- `roam_get_block_references`: Get all blocks that reference a specific block
-- `roam_export_graph`: Export entire graph or subsets in various formats
+- `create_page`: Create new pages with optional content
+- `import_markdown`: Import nested markdown content
+- `add_todo`: Add todo items to daily pages
+- `search_for_tag`: Search for blocks with specific tags
+- `update_block`: Update block content
+- `delete_block`: Delete blocks by UID
+- `get_block_references`: Get all blocks that reference a specific block
+- `export_graph`: Export entire graph or subsets in various formats
 
 ## Daily Notes Context Tool
-The `roam_context` tool is a powerful feature for understanding your recent work patterns and connected topics:
+The `daily_context` tool is a powerful feature for understanding your recent work patterns and connected topics:
 
 ### Features
 - **Auto-detection**: Automatically detects your Roam's daily note format (June 13th, 2025, 06-13-2025, etc.)
@@ -158,9 +174,9 @@ The `roam_context` tool is a powerful feature for understanding your recent work
 - **Flexible timeframes**: Fetch 1-30 days of context with configurable reference limits
 
 ### Usage Examples
-- `roam_context`: Default - last 10 days, up to 10 references per day
-- `roam_context(days=3)`: Last 3 days with default reference limit
-- `roam_context(days=7, max_references=20)`: Last week with more references per day
+- `daily_context`: Default - last 10 days, up to 10 references per day
+- `daily_context(days=3)`: Last 3 days with default reference limit
+- `daily_context(days=7, max_references=20)`: Last week with more references per day
 
 ### Output Format
 ```markdown

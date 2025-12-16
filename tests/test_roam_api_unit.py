@@ -1313,3 +1313,94 @@ class TestBulkFetchMethods:
         with patch.object(api, "run_query", side_effect=RoamAPIError("API Error")):
             chain = api.get_block_parent_chain("block-uid")
             assert chain == []
+
+
+class TestSearchBlocksByText:
+    """Tests for search_blocks_by_text method."""
+
+    def test_search_blocks_by_text_success(self) -> None:
+        """Test successful text search."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_results = [
+            ["uid1", "First block content", "Page 1"],
+            ["uid2", "Second block content", "Page 2"],
+        ]
+
+        with patch.object(api, "run_query", return_value=mock_results):
+            results = api.search_blocks_by_text("block")
+
+            assert len(results) == 2
+            assert results[0]["uid"] == "uid1"
+            assert results[0]["content"] == "First block content"
+            assert results[0]["page_title"] == "Page 1"
+            assert results[1]["uid"] == "uid2"
+
+    def test_search_blocks_by_text_with_page_filter(self) -> None:
+        """Test text search with page filter."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_results = [
+            ["uid1", "Filtered content", "Specific Page"],
+        ]
+
+        with patch.object(api, "run_query", return_value=mock_results) as mock_query:
+            results = api.search_blocks_by_text("content", page_title="Specific Page")
+
+            assert len(results) == 1
+            # Verify the query includes the page filter
+            call_args = mock_query.call_args[0][0]
+            assert "Specific Page" in call_args
+
+    def test_search_blocks_by_text_with_limit(self) -> None:
+        """Test text search respects limit."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_results = [
+            ["uid1", "Content 1", "Page 1"],
+            ["uid2", "Content 2", "Page 2"],
+            ["uid3", "Content 3", "Page 3"],
+        ]
+
+        with patch.object(api, "run_query", return_value=mock_results):
+            results = api.search_blocks_by_text("Content", limit=2)
+
+            assert len(results) == 2
+            assert results[0]["uid"] == "uid1"
+            assert results[1]["uid"] == "uid2"
+
+    def test_search_blocks_by_text_empty_results(self) -> None:
+        """Test text search with no results."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[]):
+            results = api.search_blocks_by_text("nonexistent")
+            assert results == []
+
+    def test_search_blocks_by_text_api_error(self) -> None:
+        """Test text search returns empty on API error."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", side_effect=RoamAPIError("API Error")):
+            results = api.search_blocks_by_text("query")
+            assert results == []
+
+    def test_search_blocks_by_text_auth_error_raises(self) -> None:
+        """Test text search raises on authentication error."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(
+            api, "run_query", side_effect=AuthenticationError("Auth failed")
+        ):
+            with pytest.raises(AuthenticationError):
+                api.search_blocks_by_text("query")
+
+    def test_search_blocks_by_text_invalid_query_raises(self) -> None:
+        """Test text search raises on invalid query error."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(
+            api, "run_query", side_effect=InvalidQueryError("Invalid")
+        ):
+            with pytest.raises(InvalidQueryError):
+                api.search_blocks_by_text("[:find")
