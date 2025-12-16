@@ -26,6 +26,8 @@ MAX_BACKOFF_SECONDS = 16.0
 # API configuration constants
 DEFAULT_MAX_REFERENCES = 20
 REQUEST_TIMEOUT_SECONDS = 30
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_INITIAL_BACKOFF = 10.0  # Roam rate limit is 50 req/min, so wait longer
 
 # Date format constants for daily notes
 # These are the common formats used by Roam Research for daily note page titles
@@ -309,6 +311,9 @@ class RoamAPI:
     def call(self, path: str, body: dict[str, Any]) -> requests.Response:
         """Make an API call to Roam, following redirects if necessary.
 
+        Includes automatic retry logic for rate limit errors (HTTP 429) with
+        exponential backoff.
+
         Args:
             path: API endpoint path.
             body: Request body data.
@@ -320,8 +325,52 @@ class RoamAPI:
             InvalidQueryError: If redirect URL cannot be parsed or redirect has
                 no Location header.
             AuthenticationError: If authentication fails (HTTP 401).
-            RateLimitError: If rate limit is exceeded (HTTP 429).
+            RateLimitError: If rate limit is exceeded after all retries.
             RoamAPIError: For other API errors (HTTP 400, 500, etc).
+        """
+        backoff = RATE_LIMIT_INITIAL_BACKOFF
+        last_rate_limit_error: RateLimitError | None = None
+
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            try:
+                return self._call_once(path, body)
+            except RateLimitError as e:
+                last_rate_limit_error = e
+                if attempt < RATE_LIMIT_RETRIES:
+                    logger.warning(
+                        "Rate limit hit (attempt %d/%d). Waiting %.1fs before retry...",
+                        attempt + 1,
+                        RATE_LIMIT_RETRIES + 1,
+                        backoff,
+                    )
+                    time.sleep(backoff)
+                    backoff = min(backoff * BACKOFF_MULTIPLIER, MAX_BACKOFF_SECONDS * 4)
+                else:
+                    logger.error(
+                        "Rate limit exceeded after %d attempts", RATE_LIMIT_RETRIES + 1
+                    )
+
+        # Re-raise the last rate limit error if all retries exhausted
+        if last_rate_limit_error:
+            raise last_rate_limit_error
+        # Should never reach here, but satisfies type checker
+        raise RuntimeError("Rate limit retry failed")  # pragma: no cover
+
+    def _call_once(self, path: str, body: dict[str, Any]) -> requests.Response:
+        """Make a single API call to Roam (internal method).
+
+        Args:
+            path: API endpoint path.
+            body: Request body data.
+
+        Returns:
+            Response object.
+
+        Raises:
+            InvalidQueryError: If redirect URL cannot be parsed.
+            AuthenticationError: If authentication fails (HTTP 401).
+            RateLimitError: If rate limit is exceeded (HTTP 429).
+            RoamAPIError: For other API errors.
         """
         base_url = self._redirect_cache.get(
             self.graph_name, "https://api.roamresearch.com"
@@ -333,9 +382,9 @@ class RoamAPI:
             "x-authorization": f"Bearer {self.api_token}",
         }
 
-        logger.info("Making POST request to: %s", url)
+        logger.debug("Making POST request to: %s", url)
         masked_token = self._mask_token(self.api_token)
-        logger.info("Request headers: Authorization: Bearer %s", masked_token)
+        logger.debug("Request headers: Authorization: Bearer %s", masked_token)
 
         resp = self._make_request(url, headers, body)
 
@@ -356,7 +405,7 @@ class RoamAPI:
             redirect_url = f"https://{peer}.api.roamresearch.com:{port}"
             self._redirect_cache[self.graph_name] = redirect_url
             logger.info("Cached redirect URL: %s", redirect_url)
-            return self.call(path, body)
+            return self._call_once(path, body)
 
         # Handle errors
         if not resp.ok:
@@ -371,8 +420,7 @@ class RoamAPI:
                     "Authentication error (HTTP 401): Invalid token"
                 )
             elif resp.status_code == 429:
-                msg = f"Rate limit exceeded (HTTP 429): {resp.text}"
-                raise RateLimitError(msg)
+                raise RateLimitError(f"Rate limit exceeded (HTTP 429): {resp.text}")
             else:
                 raise RoamAPIError(
                     f"Service unavailable (HTTP {resp.status_code}): "
@@ -381,7 +429,7 @@ class RoamAPI:
 
         return resp
 
-    def run_query(self, query: str, args: dict[str, Any] | None = None) -> list[Any]:
+    def run_query(self, query: str, args: list[Any] | None = None) -> list[Any]:
         """Run a Datalog query on the Roam graph.
 
         Args:
@@ -479,6 +527,56 @@ class RoamAPI:
         except RoamAPIError as e:
             # Other API errors are logged as warnings and return empty list
             logger.warning("Error finding references to %s: %s", page_title, e)
+            return []
+
+    def search_blocks_by_text(
+        self, text: str, page_title: str | None = None, limit: int = 20
+    ) -> list[dict[str, Any]]:
+        """Search for blocks containing text (case-sensitive substring match).
+
+        Args:
+            text: Text to search for in block content.
+            page_title: Optional page title to limit search scope.
+            limit: Maximum number of results to return.
+
+        Returns:
+            List of dicts with uid, content, page_title.
+
+        Raises:
+            AuthenticationError: If authentication fails.
+            InvalidQueryError: If input contains invalid patterns.
+        """
+        sanitized_text = self._sanitize_query_input(text)
+
+        if page_title:
+            sanitized_page = self._sanitize_query_input(page_title)
+            query = f"""[:find ?uid ?string ?page-title
+                         :where
+                         [?b :block/uid ?uid]
+                         [?b :block/string ?string]
+                         [(clojure.string/includes? ?string "{sanitized_text}")]
+                         [?b :block/page ?page]
+                         [?page :node/title ?page-title]
+                         [(= ?page-title "{sanitized_page}")]]"""
+        else:
+            query = f"""[:find ?uid ?string ?page-title
+                         :where
+                         [?b :block/uid ?uid]
+                         [?b :block/string ?string]
+                         [(clojure.string/includes? ?string "{sanitized_text}")]
+                         [?b :block/page ?page]
+                         [?page :node/title ?page-title]]"""
+
+        try:
+            results = self.run_query(query)
+            return [
+                {"uid": r[0], "content": r[1], "page_title": r[2]}
+                for r in results[:limit]
+            ]
+        except (AuthenticationError, InvalidQueryError):
+            raise
+        except RoamAPIError as e:
+            logger.warning("Error searching blocks for '%s': %s", text, e)
             return []
 
     def get_block(self, block_uid: str) -> dict[str, Any]:
@@ -785,3 +883,110 @@ class RoamAPI:
                 )
 
         return result
+
+    def get_all_blocks_for_sync(self) -> list[dict[str, Any]]:
+        """Fetch all blocks with metadata for vector index sync.
+
+        Returns:
+            List of block dictionaries with keys:
+                - uid: Block UID
+                - content: Block text content
+                - edit_time: Edit timestamp in milliseconds
+                - page_uid: UID of the containing page
+                - page_title: Title of the containing page
+        """
+        query = """[:find ?uid ?string ?edit-time ?page-uid ?page-title
+                    :where
+                    [?b :block/uid ?uid]
+                    [?b :block/string ?string]
+                    [?b :edit/time ?edit-time]
+                    [?b :block/page ?page]
+                    [?page :block/uid ?page-uid]
+                    [?page :node/title ?page-title]]"""
+
+        results = self.run_query(query)
+        blocks = []
+        for row in results:
+            uid, content, edit_time, page_uid, page_title = row
+            blocks.append(
+                {
+                    "uid": uid,
+                    "content": content,
+                    "edit_time": edit_time,
+                    "page_uid": page_uid,
+                    "page_title": page_title,
+                }
+            )
+
+        logger.info("Fetched %d blocks for sync", len(blocks))
+        return blocks
+
+    def get_blocks_modified_since(self, timestamp: int) -> list[dict[str, Any]]:
+        """Fetch blocks modified since a given timestamp.
+
+        Args:
+            timestamp: Timestamp in milliseconds since epoch.
+
+        Returns:
+            List of block dictionaries (same format as get_all_blocks_for_sync).
+        """
+        query = f"""[:find ?uid ?string ?edit-time ?page-uid ?page-title
+                     :where
+                     [?b :block/uid ?uid]
+                     [?b :block/string ?string]
+                     [?b :edit/time ?edit-time]
+                     [(> ?edit-time {timestamp})]
+                     [?b :block/page ?page]
+                     [?page :block/uid ?page-uid]
+                     [?page :node/title ?page-title]]"""
+
+        results = self.run_query(query)
+        blocks = []
+        for row in results:
+            uid, content, edit_time, page_uid, page_title = row
+            blocks.append(
+                {
+                    "uid": uid,
+                    "content": content,
+                    "edit_time": edit_time,
+                    "page_uid": page_uid,
+                    "page_title": page_title,
+                }
+            )
+
+        logger.info("Fetched %d blocks modified since %d", len(blocks), timestamp)
+        return blocks
+
+    def get_block_parent_chain(self, block_uid: str) -> list[str]:
+        """Get parent block content strings from root to immediate parent.
+
+        Args:
+            block_uid: UID of the block to get parents for.
+
+        Returns:
+            List of parent block content strings, ordered from root to immediate
+            parent. Returns empty list if block has no parents or is not found.
+        """
+        # Sanitize input
+        sanitized_uid = self._sanitize_query_input(block_uid)
+
+        # Query to get all ancestors with their order values
+        # Uses Roam's :block/parents attribute which contains all ancestors
+        query = f"""[:find ?parent-string ?parent-order
+                     :where
+                     [?b :block/uid "{sanitized_uid}"]
+                     [?b :block/parents ?parent]
+                     [?parent :block/string ?parent-string]
+                     [?parent :block/order ?parent-order]]"""
+
+        try:
+            results = self.run_query(query)
+            if not results:
+                return []
+
+            # Sort by order (lower order = closer to root)
+            sorted_parents = sorted(results, key=lambda x: x[1])
+            return [parent[0] for parent in sorted_parents]
+        except RoamAPIError as e:
+            logger.warning("Error getting parent chain for %s: %s", block_uid, e)
+            return []
