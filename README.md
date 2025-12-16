@@ -1,6 +1,6 @@
 # MCP Server for Roam Research
 
-A Model Context Protocol (MCP) server that connects AI assistants to your Roam Research knowledge graph. Query your notes, create new content, and discover connections across your second brain—all through natural conversation.
+A Model Context Protocol (MCP) server that provides access to Roam Research functionality for LLMs.
 
 ## Features
 
