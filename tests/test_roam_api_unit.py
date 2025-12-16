@@ -382,8 +382,9 @@ class TestRoamAPICall:
             api.call("/api/graph/test-graph/q", {"query": "test"})
         assert "Authentication error (HTTP 401)" in str(exc_info.value)
 
+    @patch("mcp_server_roam.roam_api.time.sleep")
     @patch("mcp_server_roam.roam_api.requests.post")
-    def test_call_error_429(self, mock_post: MagicMock) -> None:
+    def test_call_error_429(self, mock_post: MagicMock, mock_sleep: MagicMock) -> None:
         """Test error handling for HTTP 429 (rate limit)."""
         error_response = MagicMock()
         error_response.ok = False
@@ -556,9 +557,10 @@ class TestGetReferencesToPage:
 
         assert "suspicious pattern" in str(exc_info.value)
 
+    @patch("mcp_server_roam.roam_api.time.sleep")
     @patch("mcp_server_roam.roam_api.requests.post")
     def test_get_references_rate_limit_returns_empty(
-        self, mock_post: MagicMock
+        self, mock_post: MagicMock, mock_sleep: MagicMock
     ) -> None:
         """Test get references returns empty list on rate limit error."""
         error_response = MagicMock()
