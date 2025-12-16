@@ -24,6 +24,7 @@ from mcp_server_roam.server import (
     roam_debug_daily_notes,
     roam_get_page_markdown,
     roam_hello_world,
+    roam_semantic_search,
     roam_sync_index,
     serve,
     server,
@@ -763,6 +764,389 @@ class TestRoamSyncIndex:
         mock_roam.get_all_blocks_for_sync.assert_called_once()
 
 
+# Tests for roam_semantic_search
+class TestRoamSemanticSearch:
+    """Tests for roam_semantic_search function."""
+
+    def test_search_not_initialized(self, mocker: MockerFixture) -> None:
+        """Test search returns message when index not initialized."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mocker.patch("mcp_server_roam.server.get_embedding_service")
+
+        result = roam_semantic_search("test query")
+
+        assert "not initialized" in result.lower()
+        assert "roam_sync_index" in result
+
+    def test_search_with_results(self, mocker: MockerFixture) -> None:
+        """Test search returns formatted results."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = ["Parent 1"]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Test content",
+                "page_title": "Test Page",
+                "similarity": 0.8,
+                "parent_chain": None,
+            }
+        ]
+        # Mock the edit_time lookup
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("test query")
+
+        assert "Search Results" in result
+        assert "Test Page" in result
+        assert "Test content" in result
+        assert "block-1" in result
+
+    def test_search_no_results(self, mocker: MockerFixture) -> None:
+        """Test search returns message when no results found."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = []
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("obscure query")
+
+        assert "No results found" in result
+
+    def test_search_with_incremental_sync(self, mocker: MockerFixture) -> None:
+        """Test search performs incremental sync when blocks modified."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = [
+            {"uid": "new-block", "content": "New", "page_title": "P", "edit_time": 2000}
+        ]
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mock_embedding.embed_texts.return_value = np.array([[0.1] * 384])
+        mock_embedding.format_block_for_embedding.return_value = "formatted"
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("test")
+
+        # Should have synced the new block
+        mock_store.upsert_blocks.assert_called_once()
+        mock_store.upsert_embeddings.assert_called_once()
+        mock_store.set_last_sync_timestamp.assert_called_once_with(2000)
+
+    def test_search_without_context(self, mocker: MockerFixture) -> None:
+        """Test search with include_context=False."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("test", include_context=False)
+
+        # Should not fetch parent chain
+        mock_roam.get_block_parent_chain.assert_not_called()
+
+    def test_search_api_error(self, mocker: MockerFixture) -> None:
+        """Test search handles API errors gracefully."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.side_effect = RoamAPIError("API Error")
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mocker.patch("mcp_server_roam.server.get_embedding_service")
+
+        result = roam_semantic_search("test")
+
+        assert "Error during search" in result
+
+    def test_search_unexpected_error(self, mocker: MockerFixture) -> None:
+        """Test search handles unexpected errors gracefully."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.side_effect = ValueError("Unexpected")
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mocker.patch("mcp_server_roam.server.get_embedding_service")
+
+        result = roam_semantic_search("test")
+
+        assert "Unexpected error" in result
+
+    def test_search_truncates_long_content(self, mocker: MockerFixture) -> None:
+        """Test search truncates content over 500 chars."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        long_content = "A" * 600
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": long_content,
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("test")
+
+        # Content should be truncated
+        assert "..." in result
+        assert len(result) < len(long_content) + 200  # Reasonable output size
+
+    def test_search_no_timestamp_skips_incremental(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test search skips incremental sync when no timestamp."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = None  # No timestamp
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("test")
+
+        # Should not try to get modified blocks
+        mock_roam.get_blocks_modified_since.assert_not_called()
+        assert "Search Results" in result
+
+    def test_search_with_recency_boost(self, mocker: MockerFixture) -> None:
+        """Test search applies recency boost to recent blocks."""
+        import numpy as np
+        import time as time_module
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        # Use a very recent timestamp (now)
+        recent_time = int(time_module.time() * 1000)
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": recent_time}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("test")
+
+        assert "Search Results" in result
+
+    def test_search_with_existing_parent_chain(self, mocker: MockerFixture) -> None:
+        """Test search uses existing parent_chain without fetching."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": ["Already", "Exists"],  # Already has parent chain
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_semantic_search("test", include_context=True)
+
+        # Should not fetch parent chain since it already exists
+        mock_roam.get_block_parent_chain.assert_not_called()
+        assert "Already > Exists" in result
+
+
 # Tests for call_tool
 class TestCallTool:
     """Tests for call_tool handler."""
@@ -864,6 +1248,38 @@ class TestCallTool:
         mock_sync.assert_called_once_with(False)
 
     @pytest.mark.asyncio
+    async def test_call_tool_semantic_search(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles semantic_search."""
+        mock_search = mocker.patch(
+            "mcp_server_roam.server.roam_semantic_search",
+            return_value="Search results",
+        )
+
+        result = await call_tool(
+            "roam_semantic_search",
+            {"query": "test", "limit": 5, "include_context": False},
+        )
+
+        assert len(result) == 1
+        assert "Search results" in result[0].text
+        mock_search.assert_called_once_with("test", 5, False)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_semantic_search_defaults(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test call_tool handles semantic_search with default args."""
+        mock_search = mocker.patch(
+            "mcp_server_roam.server.roam_semantic_search",
+            return_value="Search results",
+        )
+
+        result = await call_tool("roam_semantic_search", {"query": "test"})
+
+        assert len(result) == 1
+        mock_search.assert_called_once_with("test", 10, True)
+
+    @pytest.mark.asyncio
     async def test_call_tool_unknown_tool(self) -> None:
         """Test call_tool raises error for unknown tool."""
         with pytest.raises(ValueError) as exc_info:
@@ -887,7 +1303,8 @@ class TestListTools:
         assert "roam_context" in tool_names
         assert "roam_debug_daily_notes" in tool_names
         assert "roam_sync_index" in tool_names
-        assert len(tools) == 6
+        assert "roam_semantic_search" in tool_names
+        assert len(tools) == 7
 
 
 # Tests for serve function

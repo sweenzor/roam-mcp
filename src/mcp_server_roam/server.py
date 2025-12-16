@@ -78,6 +78,14 @@ class RoamSyncIndex(BaseModel):
     full: bool = False
 
 
+class RoamSemanticSearch(BaseModel):
+    """Input schema for semantic_search tool."""
+
+    query: str
+    limit: int = 10
+    include_context: bool = True
+
+
 # Tool implementation functions
 def roam_hello_world(name: str = "World") -> str:
     """Simple hello world tool for Roam Research MCP.
@@ -331,6 +339,148 @@ def roam_sync_index(full: bool = False) -> str:
         return f"Unexpected error during sync: {str(e)}"
 
 
+# Constants for semantic search
+SEARCH_MIN_SIMILARITY = 0.3
+RECENCY_BOOST_DAYS = 30
+RECENCY_BOOST_MAX = 0.1
+
+
+def roam_semantic_search(
+    query: str,
+    limit: int = 10,
+    include_context: bool = True,
+) -> str:
+    """Search for blocks using semantic similarity.
+
+    Args:
+        query: Natural language search query.
+        limit: Maximum number of results to return (default: 10).
+        include_context: Include parent hierarchy context (default: True).
+
+    Returns:
+        Formatted search results with block content, page titles, and similarity.
+    """
+    try:
+        roam = get_roam_client()
+        store = get_vector_store(roam.graph_name)
+        embedding_service = get_embedding_service()
+
+        # Check if index is initialized
+        if store.get_sync_status() == SyncStatus.NOT_INITIALIZED:
+            return (
+                "Vector index not initialized. "
+                "Please run roam_sync_index first to build the search index."
+            )
+
+        # Perform incremental sync before search
+        last_timestamp = store.get_last_sync_timestamp()
+        if last_timestamp is not None:
+            modified_blocks = roam.get_blocks_modified_since(last_timestamp)
+            if modified_blocks:
+                # Sync the modified blocks
+                store.upsert_blocks(modified_blocks)
+
+                # Generate and store embeddings
+                texts = []
+                uids = []
+                for block in modified_blocks:
+                    formatted_text = embedding_service.format_block_for_embedding(
+                        content=block["content"],
+                        page_title=block.get("page_title"),
+                        parent_chain=None,
+                    )
+                    texts.append(formatted_text)
+                    uids.append(block["uid"])
+
+                embeddings = embedding_service.embed_texts(texts)
+                store.upsert_embeddings(uids, embeddings)
+
+                # Update sync timestamp
+                max_edit_time = max(
+                    b["edit_time"] for b in modified_blocks if b.get("edit_time")
+                )
+                store.set_last_sync_timestamp(max_edit_time)
+
+        # Embed the query
+        query_embedding = embedding_service.embed_single(query)
+
+        # Search the vector store (fetch more than limit to allow for filtering)
+        raw_results = store.search(
+            query_embedding,
+            limit=limit * 2,
+            min_similarity=SEARCH_MIN_SIMILARITY,
+        )
+
+        if not raw_results:
+            return f"No results found for: {query}"
+
+        # Apply recency boost
+        now_ms = int(time.time() * 1000)
+        boosted_results = []
+        for result in raw_results:
+            # Get edit time from the blocks table
+            cursor = store.conn.execute(
+                "SELECT edit_time FROM blocks WHERE uid = ?",
+                (result["uid"],),
+            )
+            row = cursor.fetchone()
+            edit_time = row["edit_time"] if row and row["edit_time"] else 0
+
+            # Calculate recency boost (linear decay over RECENCY_BOOST_DAYS)
+            age_days = (now_ms - edit_time) / (1000 * 60 * 60 * 24)
+            if age_days < RECENCY_BOOST_DAYS:
+                recency_factor = 1 - (age_days / RECENCY_BOOST_DAYS)
+                boost = RECENCY_BOOST_MAX * recency_factor
+            else:
+                boost = 0
+
+            boosted_similarity = result["similarity"] + boost
+            boosted_results.append({
+                **result,
+                "boosted_similarity": boosted_similarity,
+                "edit_time": edit_time,
+            })
+
+        # Sort by boosted similarity and limit
+        boosted_results.sort(key=lambda x: x["boosted_similarity"], reverse=True)
+        final_results = boosted_results[:limit]
+
+        # Optionally fetch parent chain context
+        if include_context:
+            for result in final_results:
+                if not result.get("parent_chain"):
+                    parent_chain = roam.get_block_parent_chain(result["uid"])
+                    result["parent_chain"] = parent_chain if parent_chain else None
+
+        # Format output
+        output_lines = [f"# Search Results for: {query}\n"]
+        output_lines.append(f"Found {len(final_results)} results:\n")
+
+        for i, result in enumerate(final_results, 1):
+            similarity = result["similarity"]
+            page_title = result.get("page_title") or "Unknown"
+            content = result["content"]
+
+            output_lines.append(f"## {i}. [{similarity:.3f}] {page_title}")
+
+            if include_context and result.get("parent_chain"):
+                path = " > ".join(result["parent_chain"])
+                output_lines.append(f"**Path:** {path}")
+
+            # Truncate long content
+            if len(content) > 500:
+                content = content[:500] + "..."
+            output_lines.append(f"{content}")
+            output_lines.append(f"*UID: {result['uid']}*\n")
+
+        return "\n".join(output_lines)
+
+    except RoamAPIError as e:
+        return f"Error during search: {str(e)}"
+    except Exception as e:
+        return f"Unexpected error during search: {str(e)}"
+
+
 # Create the server instance - this is what mcp dev looks for
 server = Server("mcp-roam")
 
@@ -374,6 +524,11 @@ async def list_tools() -> list[Tool]:
             description="Build or update the vector index for semantic search",
             inputSchema=RoamSyncIndex.model_json_schema(),
         ),
+        Tool(
+            name="roam_semantic_search",
+            description="Search blocks using semantic similarity",
+            inputSchema=RoamSemanticSearch.model_json_schema(),
+        ),
     ]
 
 
@@ -408,6 +563,12 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = roam_debug_daily_notes()
         case "roam_sync_index":
             result = roam_sync_index(arguments.get("full", False))
+        case "roam_semantic_search":
+            result = roam_semantic_search(
+                arguments["query"],
+                arguments.get("limit", 10),
+                arguments.get("include_context", True),
+            )
         case _:
             raise ValueError(f"Unknown tool: {name}")
 

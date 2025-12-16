@@ -63,6 +63,7 @@ class TestE2E:
                 "roam_context",
                 "roam_debug_daily_notes",
                 "roam_sync_index",
+                "roam_semantic_search",
             }
             assert expected == tool_names
 
