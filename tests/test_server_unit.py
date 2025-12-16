@@ -21,6 +21,8 @@ from mcp_server_roam.server import (
     create_block,
     daily_context,
     debug_daily_notes,
+    extract_references,
+    format_edit_time,
     get_backlinks,
     get_block_context,
     get_page,
@@ -1269,7 +1271,7 @@ class TestCallTool:
 
         assert len(result) == 1
         assert "Search results" in result[0].text
-        mock_search.assert_called_once_with("test", 5, False)
+        mock_search.assert_called_once_with("test", 5, False, False, 3, False, False, 1)
 
     @pytest.mark.asyncio
     async def test_call_tool_semantic_search_defaults(
@@ -1284,7 +1286,35 @@ class TestCallTool:
         result = await call_tool("semantic_search", {"query": "test"})
 
         assert len(result) == 1
-        mock_search.assert_called_once_with("test", 10, True)
+        mock_search.assert_called_once_with("test", 10, True, False, 3, False, False, 1)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_semantic_search_with_enrichments(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test call_tool handles semantic_search with all enrichment params."""
+        mock_search = mocker.patch(
+            "mcp_server_roam.server.semantic_search",
+            return_value="Enriched results",
+        )
+
+        result = await call_tool(
+            "semantic_search",
+            {
+                "query": "test",
+                "limit": 5,
+                "include_context": True,
+                "include_children": True,
+                "children_limit": 5,
+                "include_backlink_count": True,
+                "include_siblings": True,
+                "sibling_count": 2,
+            },
+        )
+
+        assert len(result) == 1
+        assert "Enriched results" in result[0].text
+        mock_search.assert_called_once_with("test", 5, True, True, 5, True, True, 2)
 
     @pytest.mark.asyncio
     async def test_call_tool_get_block_context(self, mocker: MockerFixture) -> None:
@@ -1772,3 +1802,376 @@ class TestGetBacklinks:
         result = get_backlinks("Page")
 
         assert "..." in result
+
+
+# Tests for extract_references helper function
+class TestExtractReferences:
+    """Tests for the extract_references helper function."""
+
+    def test_extract_tags_simple(self) -> None:
+        """Test extracting simple hashtags."""
+        result = extract_references("This is a #test with #multiple #tags")
+        assert set(result["tags"]) == {"test", "multiple", "tags"}
+
+    def test_extract_tags_with_hyphens(self) -> None:
+        """Test extracting hashtags with hyphens."""
+        result = extract_references("Using #my-tag and #another-one")
+        assert set(result["tags"]) == {"my-tag", "another-one"}
+
+    def test_extract_page_refs(self) -> None:
+        """Test extracting page references."""
+        result = extract_references("Link to [[Page One]] and [[Page Two]]")
+        assert set(result["page_refs"]) == {"Page One", "Page Two"}
+
+    def test_extract_mixed_refs(self) -> None:
+        """Test extracting both tags and page references."""
+        result = extract_references("A #tag with [[Page Reference]] mixed in")
+        assert "tag" in result["tags"]
+        assert "Page Reference" in result["page_refs"]
+
+    def test_extract_no_refs(self) -> None:
+        """Test content with no tags or page refs."""
+        result = extract_references("Plain text content")
+        assert result["tags"] == []
+        assert result["page_refs"] == []
+
+    def test_extract_deduplicates(self) -> None:
+        """Test that duplicate tags and refs are deduplicated."""
+        result = extract_references("#tag #tag [[Page]] [[Page]]")
+        assert result["tags"] == ["tag"]
+        assert result["page_refs"] == ["Page"]
+
+    def test_extract_empty_string(self) -> None:
+        """Test empty string input."""
+        result = extract_references("")
+        assert result["tags"] == []
+        assert result["page_refs"] == []
+
+
+# Tests for format_edit_time helper function
+class TestFormatEditTime:
+    """Tests for the format_edit_time helper function."""
+
+    def test_format_valid_timestamp(self) -> None:
+        """Test formatting a valid timestamp."""
+        # Dec 15, 2025 at midnight UTC
+        timestamp_ms = 1765756800000
+        result = format_edit_time(timestamp_ms)
+        assert "Dec" in result
+        assert "2025" in result
+
+    def test_format_zero_timestamp(self) -> None:
+        """Test formatting zero timestamp."""
+        result = format_edit_time(0)
+        assert result == "Unknown"
+
+    def test_format_none_equivalent(self) -> None:
+        """Test formatting when timestamp is falsy."""
+        result = format_edit_time(0)
+        assert result == "Unknown"
+
+
+# Tests for semantic search enrichments
+class TestSemanticSearchEnrichments:
+    """Tests for the new semantic search enrichment features."""
+
+    def test_search_with_children(self, mocker: MockerFixture) -> None:
+        """Test search with include_children=True."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        mock_roam.get_block_children_preview.return_value = [
+            {"uid": "child1", "content": "Child block 1"},
+            {"uid": "child2", "content": "Child block 2"},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Parent content",
+                "page_title": "Test Page",
+                "similarity": 0.8,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = semantic_search("test", include_children=True, children_limit=2)
+
+        assert "Children:" in result
+        assert "Child block 1" in result
+        assert "Child block 2" in result
+        mock_roam.get_block_children_preview.assert_called_once_with("block-1", 2)
+
+    def test_search_with_children_truncation(self, mocker: MockerFixture) -> None:
+        """Test that long child content is truncated to 150 chars."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        # Create a child with content > 150 chars
+        long_content = "A" * 200  # 200 characters
+        mock_roam.get_block_children_preview.return_value = [
+            {"uid": "child1", "content": long_content},
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Parent content",
+                "page_title": "Test Page",
+                "similarity": 0.8,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = semantic_search("test", include_children=True, children_limit=1)
+
+        # Check that content is truncated to 150 chars + "..."
+        assert "A" * 150 + "..." in result
+        assert "A" * 200 not in result
+
+    def test_search_with_backlink_count(self, mocker: MockerFixture) -> None:
+        """Test search with include_backlink_count=True."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        mock_roam.get_block_reference_count.return_value = 5
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = semantic_search("test", include_backlink_count=True)
+
+        assert "Referenced by:" in result
+        assert "5 blocks" in result
+        mock_roam.get_block_reference_count.assert_called_once_with("block-1")
+
+    def test_search_with_siblings(self, mocker: MockerFixture) -> None:
+        """Test search with include_siblings=True."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        mock_roam.get_block_siblings.return_value = {
+            "before": [{"uid": "sib1", "content": "Previous sibling"}],
+            "after": [{"uid": "sib2", "content": "Next sibling"}],
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Main content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = semantic_search("test", include_siblings=True, sibling_count=1)
+
+        assert "Context:" in result
+        assert "Previous sibling" in result
+        assert "Next sibling" in result
+        assert "↑" in result  # Before indicator
+        assert "↓" in result  # After indicator
+        mock_roam.get_block_siblings.assert_called_once_with("block-1", 1)
+
+    def test_search_with_empty_siblings(self, mocker: MockerFixture) -> None:
+        """Test search when siblings exist but are all empty."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        # Siblings exist but both before and after are empty
+        mock_roam.get_block_siblings.return_value = {
+            "before": [],
+            "after": [],
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Main content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = semantic_search("test", include_siblings=True, sibling_count=1)
+
+        # Context section should not appear when no siblings exist
+        assert "Context:" not in result
+        # But main content should still appear
+        assert "Main content" in result
+
+    def test_search_extracts_tags_and_refs(self, mocker: MockerFixture) -> None:
+        """Test that search extracts and displays tags and page references."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content with #tag and [[Page Link]]",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": 1000}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = semantic_search("test")
+
+        assert "Tags:" in result
+        assert "#tag" in result
+        assert "Links:" in result
+        assert "[[Page Link]]" in result
+
+    def test_search_shows_modified_date(self, mocker: MockerFixture) -> None:
+        """Test that search displays modified date."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mock_roam.get_block_parent_chain.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        # Use a specific timestamp: Jan 15, 2025
+        edit_time_ms = 1736899200000
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mock_store.search.return_value = [
+            {
+                "uid": "block-1",
+                "content": "Content",
+                "page_title": "Page",
+                "similarity": 0.7,
+                "parent_chain": None,
+            }
+        ]
+        mock_cursor = mocker.MagicMock()
+        mock_cursor.fetchone.return_value = {"edit_time": edit_time_ms}
+        mock_store.conn.execute.return_value = mock_cursor
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.embed_single.return_value = np.array([0.1] * 384)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = semantic_search("test")
+
+        assert "Modified:" in result
+        assert "Jan" in result
+        assert "2025" in result

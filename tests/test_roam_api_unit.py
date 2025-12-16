@@ -1408,3 +1408,184 @@ class TestSearchBlocksByText:
             pytest.raises(InvalidQueryError),
         ):
             api.search_blocks_by_text("[:find")
+
+
+class TestGetBlockChildrenPreview:
+    """Tests for get_block_children_preview method."""
+
+    def test_get_children_preview_success(self) -> None:
+        """Test fetching children preview for a block."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_results = [
+            ["child-uid-1", "First child content", 0],
+            ["child-uid-2", "Second child content", 1],
+            ["child-uid-3", "Third child content", 2],
+        ]
+
+        with patch.object(api, "run_query", return_value=mock_results):
+            children = api.get_block_children_preview("parent-uid", limit=2)
+
+            # Should return sorted by order and limited
+            assert len(children) == 2
+            assert children[0]["uid"] == "child-uid-1"
+            assert children[0]["content"] == "First child content"
+            assert children[1]["uid"] == "child-uid-2"
+
+    def test_get_children_preview_empty(self) -> None:
+        """Test fetching children when block has no children."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[]):
+            children = api.get_block_children_preview("parent-uid")
+            assert children == []
+
+    def test_get_children_preview_api_error(self) -> None:
+        """Test children preview returns empty on API error."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", side_effect=RoamAPIError("API Error")):
+            children = api.get_block_children_preview("parent-uid")
+            assert children == []
+
+
+class TestGetBlockReferenceCount:
+    """Tests for get_block_reference_count method."""
+
+    def test_get_reference_count_success(self) -> None:
+        """Test fetching reference count for a block."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[[5]]):
+            count = api.get_block_reference_count("block-uid")
+            assert count == 5
+
+    def test_get_reference_count_zero(self) -> None:
+        """Test fetching reference count when no references."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[]):
+            count = api.get_block_reference_count("block-uid")
+            assert count == 0
+
+    def test_get_reference_count_api_error(self) -> None:
+        """Test reference count returns 0 on API error."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", side_effect=RoamAPIError("API Error")):
+            count = api.get_block_reference_count("block-uid")
+            assert count == 0
+
+
+class TestGetBlockSiblings:
+    """Tests for get_block_siblings method."""
+
+    def test_get_siblings_success(self) -> None:
+        """Test fetching siblings for a block."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        parent_result = [["parent-uid", 2]]  # Block is at order 2
+        siblings_result = [
+            ["sib-1", "Sibling 1", 0],
+            ["sib-2", "Sibling 2", 1],
+            ["block-uid", "Current block", 2],
+            ["sib-3", "Sibling 3", 3],
+            ["sib-4", "Sibling 4", 4],
+        ]
+
+        with patch.object(
+            api, "run_query", side_effect=[parent_result, siblings_result]
+        ):
+            siblings = api.get_block_siblings("block-uid", count=1)
+
+            assert len(siblings["before"]) == 1
+            assert siblings["before"][0]["content"] == "Sibling 2"
+            assert len(siblings["after"]) == 1
+            assert siblings["after"][0]["content"] == "Sibling 3"
+
+    def test_get_siblings_no_parent(self) -> None:
+        """Test fetching siblings when block has no parent."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[]):
+            siblings = api.get_block_siblings("block-uid")
+            assert siblings == {"before": [], "after": []}
+
+    def test_get_siblings_first_block(self) -> None:
+        """Test fetching siblings when block is first child."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        parent_result = [["parent-uid", 0]]
+        siblings_result = [
+            ["block-uid", "Current block", 0],
+            ["sib-1", "Sibling 1", 1],
+            ["sib-2", "Sibling 2", 2],
+        ]
+
+        with patch.object(
+            api, "run_query", side_effect=[parent_result, siblings_result]
+        ):
+            siblings = api.get_block_siblings("block-uid", count=1)
+
+            assert siblings["before"] == []
+            assert len(siblings["after"]) == 1
+            assert siblings["after"][0]["content"] == "Sibling 1"
+
+    def test_get_siblings_last_block(self) -> None:
+        """Test fetching siblings when block is last child."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        parent_result = [["parent-uid", 2]]
+        siblings_result = [
+            ["sib-1", "Sibling 1", 0],
+            ["sib-2", "Sibling 2", 1],
+            ["block-uid", "Current block", 2],
+        ]
+
+        with patch.object(
+            api, "run_query", side_effect=[parent_result, siblings_result]
+        ):
+            siblings = api.get_block_siblings("block-uid", count=1)
+
+            assert len(siblings["before"]) == 1
+            assert siblings["before"][0]["content"] == "Sibling 2"
+            assert siblings["after"] == []
+
+    def test_get_siblings_api_error(self) -> None:
+        """Test siblings returns empty on API error."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", side_effect=RoamAPIError("API Error")):
+            siblings = api.get_block_siblings("block-uid")
+            assert siblings == {"before": [], "after": []}
+
+    def test_get_siblings_empty_siblings_query(self) -> None:
+        """Test fetching siblings when siblings query returns empty."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        parent_result = [["parent-uid", 1]]  # Parent found
+        siblings_result: list[list[str | int]] = []  # But no siblings found
+
+        with patch.object(
+            api, "run_query", side_effect=[parent_result, siblings_result]
+        ):
+            siblings = api.get_block_siblings("block-uid", count=1)
+            assert siblings == {"before": [], "after": []}
+
+    def test_get_siblings_block_not_in_results(self) -> None:
+        """Test when block_uid is not found in siblings result (edge case)."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        parent_result = [["parent-uid", 1]]
+        # Siblings exist but current block not in list (unusual edge case)
+        siblings_result = [
+            ["other-1", "Other block 1", 0],
+            ["other-2", "Other block 2", 1],
+        ]
+
+        with patch.object(
+            api, "run_query", side_effect=[parent_result, siblings_result]
+        ):
+            siblings = api.get_block_siblings("block-uid", count=1)
+            # Loop finishes without finding the block - returns empty
+            assert siblings == {"before": [], "after": []}
