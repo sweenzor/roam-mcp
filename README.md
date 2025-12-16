@@ -8,7 +8,7 @@ A Model Context Protocol (MCP) server that provides access to Roam Research func
 
 - **Daily Notes Context** — Understand your recent work at a glance. Fetches daily notes along with all blocks that reference them, automatically detecting your date format.
 
-- **Full Graph Access** — Read pages as clean markdown, create blocks, execute Datalog queries, and traverse backlinks. Works with unlimited nesting depth.
+- **Full Graph Access** — Read pages as clean markdown, execute Datalog queries, and traverse backlinks. Works with unlimited nesting depth.
 
 - **Incremental Sync** — The semantic index updates automatically, only processing new or modified blocks. Initial indexing handles ~90k blocks in about 6 minutes; subsequent syncs take seconds.
 
