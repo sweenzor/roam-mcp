@@ -80,13 +80,46 @@ uv run mcp dev
 | `roam_create_block` | Create a new block in a Roam page |
 | `roam_context` | Get daily notes with backlinks for context |
 | `roam_debug_daily_notes` | Debug daily note format detection |
+| `roam_sync_index` | Build/update the vector index for semantic search |
 
 ### Key Features
 
+- **Semantic Search**: Vector-based search across all blocks using sentence-transformers
 - **Daily Note Context**: `roam_context` fetches recent daily notes + all blocks that reference them
 - **Auto-detection**: Automatically detects daily note formats (e.g., "June 13th, 2025", "06-13-2025")
 - **Recursive Processing**: Handles unlimited block nesting depth
 - **Error Handling**: Graceful handling of missing pages and API errors
+
+## Semantic Search
+
+The server includes a vector-based semantic search capability powered by [sentence-transformers](https://www.sbert.net/) and [sqlite-vec](https://github.com/asg017/sqlite-vec).
+
+### How It Works
+
+1. **Indexing**: `roam_sync_index` fetches all blocks from your Roam graph and generates embeddings using the `all-MiniLM-L6-v2` model (384 dimensions)
+2. **Storage**: Embeddings are stored locally in `~/.roam-mcp/{graph_name}_vectors.db`
+3. **Search**: Query embeddings are compared against stored embeddings using cosine similarity
+
+### Usage
+
+```bash
+# First, build the index (takes ~6 minutes for 90k blocks)
+# Call roam_sync_index via MCP or:
+uv run python -c "
+from mcp_server_roam.server import roam_sync_index
+print(roam_sync_index(full=True))
+"
+
+# Incremental updates (only new/modified blocks)
+roam_sync_index(full=False)
+```
+
+### Performance
+
+- Initial sync: ~90,000 blocks indexed in ~6 minutes
+- Index size: ~150MB for 90k blocks
+- Search latency: <100ms
+- Embedding model downloads ~90MB on first use
 
 ## Development
 
