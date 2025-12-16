@@ -128,8 +128,15 @@ Currently implemented tools:
    - Uses all-MiniLM-L6-v2 model (384 dimensions)
    - Supports incremental updates (only new/modified blocks)
 
+7. `roam_semantic_search`: Search blocks using vector similarity
+   - Input: query (string), limit (int, default: 10), include_context (bool, default: True)
+   - Output: Formatted search results with similarity scores and context
+   - Performs incremental sync before each search to capture recent changes
+   - Applies recency boost (linear decay over 30 days, max 0.1 boost)
+   - Returns parent chain context for each result
+   - Minimum similarity threshold of 0.3
+
 Future tools to consider:
-- `roam_semantic_search`: Search blocks using semantic similarity (infrastructure ready)
 - `roam_create_page`: Create new pages with optional content
 - `roam_import_markdown`: Import nested markdown content
 - `roam_add_todo`: Add todo items to daily pages
@@ -271,7 +278,7 @@ Roam uses Datalog for querying its graph database. Key aspects:
 - **E2E tests**: `test_e2e.py` - require ROAM_API_TOKEN and ROAM_GRAPH_NAME env vars
 - E2E tests auto-skip when credentials not available
 - MCP Inspector for interactive testing: `uv run mcp dev`
-- **Coverage targets**: Aim for >80% code coverage
+- **Coverage targets**: Maintain 100% code coverage
 - Use `pytest-cov` for coverage reporting
 
 ## Deployment

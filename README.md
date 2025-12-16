@@ -81,6 +81,7 @@ uv run mcp dev
 | `roam_context` | Get daily notes with backlinks for context |
 | `roam_debug_daily_notes` | Debug daily note format detection |
 | `roam_sync_index` | Build/update the vector index for semantic search |
+| `roam_semantic_search` | Search blocks using vector similarity with recency boost |
 
 ### Key Features
 
@@ -112,7 +113,20 @@ print(roam_sync_index(full=True))
 
 # Incremental updates (only new/modified blocks)
 roam_sync_index(full=False)
+
+# Search your Roam graph semantically
+uv run python -c "
+from mcp_server_roam.server import roam_semantic_search
+print(roam_semantic_search('project management tools', limit=5))
+"
 ```
+
+### Search Features
+
+- **Incremental Sync**: Automatically syncs new/modified blocks before each search
+- **Recency Boost**: Recent content (last 30 days) ranks higher with linear decay
+- **Parent Context**: Results include parent block chain for understanding hierarchy
+- **Similarity Threshold**: Filters out low-relevance results (default: 0.3)
 
 ### Performance
 
