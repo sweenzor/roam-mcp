@@ -119,11 +119,14 @@ class TestEmbeddingService:
         mock_transformer.return_value = mock_model
 
         # Create mock embeddings for 3 texts
-        mock_embeddings = np.array([
-            [0.1] * EMBEDDING_DIMENSIONS,
-            [0.2] * EMBEDDING_DIMENSIONS,
-            [0.3] * EMBEDDING_DIMENSIONS,
-        ], dtype=np.float64)
+        mock_embeddings = np.array(
+            [
+                [0.1] * EMBEDDING_DIMENSIONS,
+                [0.2] * EMBEDDING_DIMENSIONS,
+                [0.3] * EMBEDDING_DIMENSIONS,
+            ],
+            dtype=np.float64,
+        )
         mock_model.encode.return_value = mock_embeddings
 
         mocker.patch(

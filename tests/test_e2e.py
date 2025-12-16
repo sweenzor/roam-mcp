@@ -72,9 +72,7 @@ class TestE2E:
             assert expected == tool_names
 
             # Test hello_world
-            result = await session.call_tool(
-                "hello_world", {"name": "E2E"}
-            )
+            result = await session.call_tool("hello_world", {"name": "E2E"})
             assert "Hello, E2E!" in result.content[0].text
 
         await run_with_session(test)
@@ -84,8 +82,7 @@ class TestE2E:
 
         async def test(session: ClientSession) -> None:
             result = await session.call_tool(
-                "get_page",
-                {"title": "This Page Should Not Exist 12345xyz"}
+                "get_page", {"title": "This Page Should Not Exist 12345xyz"}
             )
             text = result.content[0].text
             assert "Error" in text or "not found" in text.lower()
@@ -104,8 +101,7 @@ class TestE2E:
 
             # Test daily_context (uses cached format, fetches 1 day only)
             context_result = await session.call_tool(
-                "daily_context",
-                {"days": 1, "max_references": 3}
+                "daily_context", {"days": 1, "max_references": 3}
             )
             assert "Daily Notes Context" in context_result.content[0].text
 
@@ -116,8 +112,7 @@ class TestE2E:
                     if match:
                         date_str = match.group(1)
                         result = await session.call_tool(
-                            "get_page",
-                            {"title": date_str}
+                            "get_page", {"title": date_str}
                         )
                         assert date_str in result.content[0].text
                         return

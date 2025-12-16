@@ -908,13 +908,15 @@ class RoamAPI:
         blocks = []
         for row in results:
             uid, content, edit_time, page_uid, page_title = row
-            blocks.append({
-                "uid": uid,
-                "content": content,
-                "edit_time": edit_time,
-                "page_uid": page_uid,
-                "page_title": page_title,
-            })
+            blocks.append(
+                {
+                    "uid": uid,
+                    "content": content,
+                    "edit_time": edit_time,
+                    "page_uid": page_uid,
+                    "page_title": page_title,
+                }
+            )
 
         logger.info("Fetched %d blocks for sync", len(blocks))
         return blocks
@@ -942,13 +944,15 @@ class RoamAPI:
         blocks = []
         for row in results:
             uid, content, edit_time, page_uid, page_title = row
-            blocks.append({
-                "uid": uid,
-                "content": content,
-                "edit_time": edit_time,
-                "page_uid": page_uid,
-                "page_title": page_title,
-            })
+            blocks.append(
+                {
+                    "uid": uid,
+                    "content": content,
+                    "edit_time": edit_time,
+                    "page_uid": page_uid,
+                    "page_title": page_title,
+                }
+            )
 
         logger.info("Fetched %d blocks modified since %d", len(blocks), timestamp)
         return blocks

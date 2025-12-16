@@ -603,9 +603,7 @@ class TestRoamSyncIndex:
 
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.format_block_for_embedding.return_value = "formatted"
@@ -634,9 +632,7 @@ class TestRoamSyncIndex:
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
         mock_store.get_last_sync_timestamp.return_value = 1000
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.format_block_for_embedding.return_value = "formatted"
@@ -660,9 +656,7 @@ class TestRoamSyncIndex:
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
         mock_store.get_last_sync_timestamp.return_value = 1000
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
@@ -683,9 +677,7 @@ class TestRoamSyncIndex:
 
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.format_block_for_embedding.return_value = "formatted"
@@ -708,9 +700,7 @@ class TestRoamSyncIndex:
 
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
@@ -728,9 +718,7 @@ class TestRoamSyncIndex:
 
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
@@ -752,9 +740,7 @@ class TestRoamSyncIndex:
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
         mock_store.get_last_sync_timestamp.return_value = None
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.format_block_for_embedding.return_value = "formatted"
@@ -792,9 +778,7 @@ class TestRoamSyncIndex:
 
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.format_block_for_embedding.return_value = "formatted"
@@ -822,9 +806,7 @@ class TestRoamSemanticSearch:
 
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
@@ -859,9 +841,7 @@ class TestRoamSemanticSearch:
         mock_cursor = mocker.MagicMock()
         mock_cursor.fetchone.return_value = {"edit_time": 1000}
         mock_store.conn.execute.return_value = mock_cursor
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -889,9 +869,7 @@ class TestRoamSemanticSearch:
         mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
         mock_store.get_last_sync_timestamp.return_value = 1000
         mock_store.search.return_value = []
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -930,9 +908,7 @@ class TestRoamSemanticSearch:
         mock_cursor = mocker.MagicMock()
         mock_cursor.fetchone.return_value = {"edit_time": 1000}
         mock_store.conn.execute.return_value = mock_cursor
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -973,9 +949,7 @@ class TestRoamSemanticSearch:
         mock_cursor = mocker.MagicMock()
         mock_cursor.fetchone.return_value = {"edit_time": 1000}
         mock_store.conn.execute.return_value = mock_cursor
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -997,9 +971,7 @@ class TestRoamSemanticSearch:
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
         mock_store.get_last_sync_timestamp.side_effect = RoamAPIError("API Error")
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
@@ -1016,9 +988,7 @@ class TestRoamSemanticSearch:
         mock_store = mocker.MagicMock()
         mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
         mock_store.get_last_sync_timestamp.side_effect = ValueError("Unexpected")
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mocker.patch("mcp_server_roam.server.get_embedding_service")
 
@@ -1052,9 +1022,7 @@ class TestRoamSemanticSearch:
         mock_cursor = mocker.MagicMock()
         mock_cursor.fetchone.return_value = {"edit_time": 1000}
         mock_store.conn.execute.return_value = mock_cursor
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -1068,9 +1036,7 @@ class TestRoamSemanticSearch:
         assert "..." in result
         assert len(result) < len(long_content) + 200  # Reasonable output size
 
-    def test_search_no_timestamp_skips_incremental(
-        self, mocker: MockerFixture
-    ) -> None:
+    def test_search_no_timestamp_skips_incremental(self, mocker: MockerFixture) -> None:
         """Test search skips incremental sync when no timestamp."""
         import numpy as np
 
@@ -1094,9 +1060,7 @@ class TestRoamSemanticSearch:
         mock_cursor = mocker.MagicMock()
         mock_cursor.fetchone.return_value = {"edit_time": 1000}
         mock_store.conn.execute.return_value = mock_cursor
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -1139,9 +1103,7 @@ class TestRoamSemanticSearch:
         mock_cursor = mocker.MagicMock()
         mock_cursor.fetchone.return_value = {"edit_time": recent_time}
         mock_store.conn.execute.return_value = mock_cursor
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -1177,9 +1139,7 @@ class TestRoamSemanticSearch:
         mock_cursor = mocker.MagicMock()
         mock_cursor.fetchone.return_value = {"edit_time": 1000}
         mock_store.conn.execute.return_value = mock_cursor
-        mocker.patch(
-            "mcp_server_roam.server.get_vector_store", return_value=mock_store
-        )
+        mocker.patch("mcp_server_roam.server.get_vector_store", return_value=mock_store)
 
         mock_embedding = mocker.MagicMock()
         mock_embedding.embed_single.return_value = np.array([0.1] * 384)
@@ -1591,9 +1551,7 @@ class TestSearchByText:
         assert "First match" in result
         assert "Second match" in result
         assert "Page 1" in result
-        mock_roam.search_blocks_by_text.assert_called_once_with(
-            "test query", None, 20
-        )
+        mock_roam.search_blocks_by_text.assert_called_once_with("test query", None, 20)
 
     def test_search_by_text_with_page_filter(self, mocker: MockerFixture) -> None:
         """Test text search with page filter."""
@@ -1656,9 +1614,7 @@ class TestSearchByText:
         assert "Error" in result
         assert "searching blocks" in result.lower()
 
-    def test_search_by_text_truncates_long_content(
-        self, mocker: MockerFixture
-    ) -> None:
+    def test_search_by_text_truncates_long_content(self, mocker: MockerFixture) -> None:
         """Test long content is truncated."""
         mock_roam = mocker.MagicMock()
         mock_roam.search_blocks_by_text.return_value = [
@@ -1699,12 +1655,12 @@ class TestRawQuery:
         mock_roam.run_query.return_value = [["result"]]
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
 
-        raw_query("[:find ?e :in $ ?title :where [?e :node/title ?title]]",
-                          args=["Test Page"])
+        raw_query(
+            "[:find ?e :in $ ?title :where [?e :node/title ?title]]", args=["Test Page"]
+        )
 
         mock_roam.run_query.assert_called_once_with(
-            "[:find ?e :in $ ?title :where [?e :node/title ?title]]",
-            ["Test Page"]
+            "[:find ?e :in $ ?title :where [?e :node/title ?title]]", ["Test Page"]
         )
 
     def test_raw_query_empty_results(self, mocker: MockerFixture) -> None:
@@ -1805,9 +1761,7 @@ class TestGetBacklinks:
         assert "Error" in result
         assert "fetching backlinks" in result.lower()
 
-    def test_get_backlinks_truncates_long_content(
-        self, mocker: MockerFixture
-    ) -> None:
+    def test_get_backlinks_truncates_long_content(self, mocker: MockerFixture) -> None:
         """Test long content is truncated."""
         mock_roam = mocker.MagicMock()
         mock_roam.get_references_to_page.return_value = [

@@ -72,7 +72,8 @@ class VectorStore:
     def _init_schema(self) -> None:
         """Initialize the database schema."""
         # Main blocks table for metadata
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS blocks (
                 uid TEXT PRIMARY KEY,
                 content TEXT NOT NULL,
@@ -83,29 +84,36 @@ class VectorStore:
                 edit_time INTEGER,
                 embedded_at INTEGER
             )
-        """)
+        """
+        )
 
         # Sync state tracking
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE TABLE IF NOT EXISTS sync_state (
                 key TEXT PRIMARY KEY,
                 value TEXT
             )
-        """)
+        """
+        )
 
         # Vector embeddings table using sqlite-vec
-        self.conn.execute(f"""
+        self.conn.execute(
+            f"""
             CREATE VIRTUAL TABLE IF NOT EXISTS vec_embeddings USING vec0(
                 uid TEXT PRIMARY KEY,
                 embedding FLOAT[{EMBEDDING_DIMENSIONS}]
             )
-        """)
+        """
+        )
 
         # Index for efficient lookups
-        self.conn.execute("""
+        self.conn.execute(
+            """
             CREATE INDEX IF NOT EXISTS idx_blocks_edit_time
             ON blocks(edit_time)
-        """)
+        """
+        )
 
         self.conn.commit()
         logger.debug("Database schema initialized")
@@ -118,9 +126,7 @@ class VectorStore:
 
     def get_sync_status(self) -> SyncStatus:
         """Get the current sync status."""
-        cursor = self.conn.execute(
-            "SELECT value FROM sync_state WHERE key = 'status'"
-        )
+        cursor = self.conn.execute("SELECT value FROM sync_state WHERE key = 'status'")
         row = cursor.fetchone()
         if row is None:
             return SyncStatus.NOT_INITIALIZED
@@ -316,13 +322,15 @@ class VectorStore:
                 json.loads(row["parent_chain"]) if row["parent_chain"] else None
             )
 
-            results.append({
-                "uid": row["uid"],
-                "content": row["content"],
-                "page_title": row["page_title"],
-                "parent_chain": parent_chain,
-                "similarity": similarity,
-            })
+            results.append(
+                {
+                    "uid": row["uid"],
+                    "content": row["content"],
+                    "page_title": row["page_title"],
+                    "parent_chain": parent_chain,
+                    "similarity": similarity,
+                }
+            )
 
         logger.debug("Vector search returned %d results", len(results))
         return results
@@ -351,12 +359,14 @@ class VectorStore:
             parent_chain = (
                 json.loads(row["parent_chain"]) if row["parent_chain"] else None
             )
-            blocks.append({
-                "uid": row["uid"],
-                "content": row["content"],
-                "page_title": row["page_title"],
-                "parent_chain": parent_chain,
-            })
+            blocks.append(
+                {
+                    "uid": row["uid"],
+                    "content": row["content"],
+                    "page_title": row["page_title"],
+                    "parent_chain": parent_chain,
+                }
+            )
 
         return blocks
 

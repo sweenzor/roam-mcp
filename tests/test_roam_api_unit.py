@@ -1389,16 +1389,20 @@ class TestSearchBlocksByText:
         """Test text search raises on authentication error."""
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
 
-        with patch.object(
-            api, "run_query", side_effect=AuthenticationError("Auth failed")
-        ), pytest.raises(AuthenticationError):
+        with (
+            patch.object(
+                api, "run_query", side_effect=AuthenticationError("Auth failed")
+            ),
+            pytest.raises(AuthenticationError),
+        ):
             api.search_blocks_by_text("query")
 
     def test_search_blocks_by_text_invalid_query_raises(self) -> None:
         """Test text search raises on invalid query error."""
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
 
-        with patch.object(
-            api, "run_query", side_effect=InvalidQueryError("Invalid")
-        ), pytest.raises(InvalidQueryError):
+        with (
+            patch.object(api, "run_query", side_effect=InvalidQueryError("Invalid")),
+            pytest.raises(InvalidQueryError),
+        ):
             api.search_blocks_by_text("[:find")

@@ -20,7 +20,7 @@ def test_hello_world() -> None:
     assert "Hello, Roam!" in result
 
 
-@patch('mcp_server_roam.server.get_roam_client')
+@patch("mcp_server_roam.server.get_roam_client")
 def test_get_page(mock_get_client: MagicMock) -> None:
     """Test get_page tool with mocked API."""
     # Mock the RoamAPI instance and its methods
@@ -44,7 +44,7 @@ def test_get_page(mock_get_client: MagicMock) -> None:
     mock_instance.process_blocks.assert_called_once()
 
 
-@patch('mcp_server_roam.server.get_roam_client')
+@patch("mcp_server_roam.server.get_roam_client")
 def test_create_block(mock_get_client: MagicMock) -> None:
     """Test create_block tool with mocked API."""
     mock_instance = MagicMock()

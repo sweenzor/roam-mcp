@@ -1,4 +1,5 @@
 """MCP server implementation for Roam Research API."""
+
 import json
 import logging
 import time
@@ -311,7 +312,8 @@ def sync_index(full: bool = False) -> str:
             blocks = roam.get_all_blocks_for_sync()
             logger.info(
                 "Fetched %d blocks from Roam API in %.1fs",
-                len(blocks), time.time() - fetch_start
+                len(blocks),
+                time.time() - fetch_start,
             )
         else:
             # Incremental sync - get blocks modified since last sync
@@ -324,7 +326,8 @@ def sync_index(full: bool = False) -> str:
                 blocks = roam.get_all_blocks_for_sync()
                 logger.info(
                     "Fetched %d blocks from Roam API in %.1fs",
-                    len(blocks), time.time() - fetch_start
+                    len(blocks),
+                    time.time() - fetch_start,
                 )
             else:
                 store.set_sync_status(SyncStatus.IN_PROGRESS)
@@ -348,7 +351,7 @@ def sync_index(full: bool = False) -> str:
         total_embedded = 0
         num_batches = (len(blocks) + SYNC_BATCH_SIZE - 1) // SYNC_BATCH_SIZE
         for batch_num, i in enumerate(range(0, len(blocks), SYNC_BATCH_SIZE), 1):
-            batch = blocks[i:i + SYNC_BATCH_SIZE]
+            batch = blocks[i : i + SYNC_BATCH_SIZE]
 
             # Format blocks for embedding with context
             texts = []
@@ -377,7 +380,9 @@ def sync_index(full: bool = False) -> str:
             if batch_num % 10 == 0 or batch_num == num_batches:
                 logger.info(
                     "Embedding progress: %d/%d batches (%d blocks)",
-                    batch_num, num_batches, total_embedded
+                    batch_num,
+                    num_batches,
+                    total_embedded,
                 )
 
         # Update sync timestamp to the latest edit_time
@@ -390,7 +395,10 @@ def sync_index(full: bool = False) -> str:
         sync_type = "Full" if do_full_sync else "Incremental"
         logger.info(
             "%s sync completed: %d blocks in %.1fs (embedding: %.1fs)",
-            sync_type, total_embedded, elapsed, embed_elapsed
+            sync_type,
+            total_embedded,
+            elapsed,
+            embed_elapsed,
         )
         return (
             f"{sync_type} sync completed in {elapsed:.1f}s. "
@@ -508,11 +516,13 @@ def semantic_search(
                 boost = 0
 
             boosted_similarity = result["similarity"] + boost
-            boosted_results.append({
-                **result,
-                "boosted_similarity": boosted_similarity,
-                "edit_time": edit_time,
-            })
+            boosted_results.append(
+                {
+                    **result,
+                    "boosted_similarity": boosted_similarity,
+                    "edit_time": edit_time,
+                }
+            )
 
         # Sort by boosted similarity and limit
         boosted_results.sort(key=lambda x: x["boosted_similarity"], reverse=True)
@@ -549,7 +559,9 @@ def semantic_search(
         elapsed = time.time() - search_start
         logger.info(
             "Semantic search completed: %d results in %.2fs for query='%s'",
-            len(final_results), elapsed, query[:50]
+            len(final_results),
+            elapsed,
+            query[:50],
         )
         return "\n".join(output_lines)
 
@@ -611,9 +623,7 @@ def get_block_context(uid: str) -> str:
         return f"Error fetching block: {str(e)}"
 
 
-def search_by_text(
-    text: str, page_title: str | None = None, limit: int = 20
-) -> str:
+def search_by_text(text: str, page_title: str | None = None, limit: int = 20) -> str:
     """Search for blocks containing text (keyword search).
 
     Args:
@@ -812,14 +822,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = get_page(arguments["title"])
         case "create_block":
             result = create_block(
-                arguments["content"],
-                arguments.get("page_uid"),
-                arguments.get("title")
+                arguments["content"], arguments.get("page_uid"), arguments.get("title")
             )
         case "daily_context":
             result = daily_context(
-                arguments.get("days", 10),
-                arguments.get("max_references", 10)
+                arguments.get("days", 10), arguments.get("max_references", 10)
             )
         case "debug_daily_notes":
             result = debug_daily_notes()

@@ -57,9 +57,7 @@ class TestVectorStoreInit:
         conn = store.conn
 
         # Check tables exist
-        cursor = conn.execute(
-            "SELECT name FROM sqlite_master WHERE type='table'"
-        )
+        cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table'")
         tables = {row[0] for row in cursor.fetchall()}
 
         assert "blocks" in tables
@@ -110,13 +108,15 @@ class TestBlockOperations:
 
     def test_upsert_blocks_single(self, vector_store: VectorStore) -> None:
         """Test upserting a single block."""
-        blocks = [{
-            "uid": "block-1",
-            "content": "Test content",
-            "page_uid": "page-1",
-            "page_title": "Test Page",
-            "edit_time": 1700000000000,
-        }]
+        blocks = [
+            {
+                "uid": "block-1",
+                "content": "Test content",
+                "page_uid": "page-1",
+                "page_title": "Test Page",
+                "edit_time": 1700000000000,
+            }
+        ]
 
         count = vector_store.upsert_blocks(blocks)
 
@@ -156,11 +156,13 @@ class TestBlockOperations:
 
     def test_upsert_blocks_with_parent_chain(self, vector_store: VectorStore) -> None:
         """Test upserting block with parent chain."""
-        blocks = [{
-            "uid": "block-1",
-            "content": "Test content",
-            "parent_chain": ["Parent 1", "Parent 2"],
-        }]
+        blocks = [
+            {
+                "uid": "block-1",
+                "content": "Test content",
+                "parent_chain": ["Parent 1", "Parent 2"],
+            }
+        ]
 
         vector_store.upsert_blocks(blocks)
 
@@ -205,10 +207,13 @@ class TestEmbeddingOperations:
         vector_store.upsert_blocks(blocks)
 
         # Then add embeddings
-        embeddings = np.array([
-            [0.1] * EMBEDDING_DIMENSIONS,
-            [0.2] * EMBEDDING_DIMENSIONS,
-        ], dtype=np.float32)
+        embeddings = np.array(
+            [
+                [0.1] * EMBEDDING_DIMENSIONS,
+                [0.2] * EMBEDDING_DIMENSIONS,
+            ],
+            dtype=np.float32,
+        )
         count = vector_store.upsert_embeddings(["block-1", "block-2"], embeddings)
 
         assert count == 2
@@ -255,10 +260,13 @@ class TestSearch:
         ]
         vector_store.upsert_blocks(blocks)
 
-        embeddings = np.array([
-            [0.1] * EMBEDDING_DIMENSIONS,
-            [0.9] * EMBEDDING_DIMENSIONS,
-        ], dtype=np.float32)
+        embeddings = np.array(
+            [
+                [0.1] * EMBEDDING_DIMENSIONS,
+                [0.9] * EMBEDDING_DIMENSIONS,
+            ],
+            dtype=np.float32,
+        )
         vector_store.upsert_embeddings(["block-1", "block-2"], embeddings)
 
         # Search with query similar to block-1
@@ -282,9 +290,7 @@ class TestSearch:
             [[float(i) * 0.1] * EMBEDDING_DIMENSIONS for i in range(5)],
             dtype=np.float32,
         )
-        vector_store.upsert_embeddings(
-            [f"block-{i}" for i in range(5)], embeddings
-        )
+        vector_store.upsert_embeddings([f"block-{i}" for i in range(5)], embeddings)
 
         query = np.array([0.0] * EMBEDDING_DIMENSIONS, dtype=np.float32)
         results = vector_store.search(query, limit=2)
@@ -293,11 +299,13 @@ class TestSearch:
 
     def test_search_with_parent_chain(self, vector_store: VectorStore) -> None:
         """Test search returns parent chain in results."""
-        blocks = [{
-            "uid": "block-1",
-            "content": "Content 1",
-            "parent_chain": ["Parent 1", "Parent 2"],
-        }]
+        blocks = [
+            {
+                "uid": "block-1",
+                "content": "Content 1",
+                "parent_chain": ["Parent 1", "Parent 2"],
+            }
+        ]
         vector_store.upsert_blocks(blocks)
 
         embedding = np.array([[0.1] * EMBEDDING_DIMENSIONS], dtype=np.float32)
@@ -321,10 +329,13 @@ class TestSearch:
         vector_store.upsert_blocks(blocks)
 
         # Create embeddings that are very different (one near 0.1, one near 0.9)
-        embeddings = np.array([
-            [0.1] * EMBEDDING_DIMENSIONS,
-            [0.9] * EMBEDDING_DIMENSIONS,
-        ], dtype=np.float32)
+        embeddings = np.array(
+            [
+                [0.1] * EMBEDDING_DIMENSIONS,
+                [0.9] * EMBEDDING_DIMENSIONS,
+            ],
+            dtype=np.float32,
+        )
         vector_store.upsert_embeddings(["block-1", "block-2"], embeddings)
 
         # Search with query similar to block-1, but with high min_similarity
@@ -347,10 +358,12 @@ class TestBlocksNeedingEmbedding:
 
     def test_returns_unembedded_blocks(self, vector_store: VectorStore) -> None:
         """Test returns blocks without embeddings."""
-        vector_store.upsert_blocks([
-            {"uid": "block-1", "content": "Content 1"},
-            {"uid": "block-2", "content": "Content 2"},
-        ])
+        vector_store.upsert_blocks(
+            [
+                {"uid": "block-1", "content": "Content 1"},
+                {"uid": "block-2", "content": "Content 2"},
+            ]
+        )
 
         blocks = vector_store.get_blocks_needing_embedding()
 
@@ -360,10 +373,12 @@ class TestBlocksNeedingEmbedding:
 
     def test_excludes_embedded_blocks(self, vector_store: VectorStore) -> None:
         """Test excludes blocks that already have embeddings."""
-        vector_store.upsert_blocks([
-            {"uid": "block-1", "content": "Content 1"},
-            {"uid": "block-2", "content": "Content 2"},
-        ])
+        vector_store.upsert_blocks(
+            [
+                {"uid": "block-1", "content": "Content 1"},
+                {"uid": "block-2", "content": "Content 2"},
+            ]
+        )
 
         # Embed block-1
         embedding = np.array([[0.1] * EMBEDDING_DIMENSIONS], dtype=np.float32)
