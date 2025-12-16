@@ -2,7 +2,6 @@
 
 import json
 import logging
-import os
 import sqlite3
 from enum import Enum
 from pathlib import Path
@@ -241,7 +240,7 @@ class VectorStore:
         )
 
         # Insert new embeddings
-        for uid, embedding in zip(uids, embeddings):
+        for uid, embedding in zip(uids, embeddings, strict=False):
             # sqlite-vec accepts numpy arrays directly if they're float32
             cursor.execute(
                 "INSERT INTO vec_embeddings (uid, embedding) VALUES (?, ?)",

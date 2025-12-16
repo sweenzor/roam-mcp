@@ -763,7 +763,7 @@ class TestRoamSyncIndex:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = sync_index(full=False)
+        sync_index(full=False)
 
         # Should do full sync since no timestamp
         mock_roam.get_all_blocks_for_sync.assert_called_once()
@@ -774,9 +774,14 @@ class TestRoamSyncIndex:
         """Test progress logging with multiple batches."""
         import numpy as np
 
-        # Create 650 blocks to trigger 11 batches (10th batch triggers logging, then 11th)
+        # Create 650 blocks to trigger 11 batches (10th batch logs)
         blocks = [
-            {"uid": f"b{i}", "content": f"Test {i}", "page_title": "P1", "edit_time": 1000}
+            {
+                "uid": f"b{i}",
+                "content": f"Test {i}",
+                "page_title": "P1",
+                "edit_time": 1000,
+            }
             for i in range(650)
         ]
 
@@ -937,7 +942,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = semantic_search("test")
+        semantic_search("test")
 
         # Should have synced the new block
         mock_store.upsert_blocks.assert_called_once()
@@ -978,7 +983,7 @@ class TestRoamSemanticSearch:
             "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
         )
 
-        result = semantic_search("test", include_context=False)
+        semantic_search("test", include_context=False)
 
         # Should not fetch parent chain
         mock_roam.get_block_parent_chain.assert_not_called()
@@ -1107,8 +1112,9 @@ class TestRoamSemanticSearch:
 
     def test_search_with_recency_boost(self, mocker: MockerFixture) -> None:
         """Test search applies recency boost to recent blocks."""
-        import numpy as np
         import time as time_module
+
+        import numpy as np
 
         mock_roam = mocker.MagicMock()
         mock_roam.graph_name = "test-graph"
@@ -1361,7 +1367,7 @@ class TestCallTool:
             return_value="Search results",
         )
 
-        result = await call_tool("search_by_text", {"text": "query"})
+        await call_tool("search_by_text", {"text": "query"})
 
         mock_search.assert_called_once_with("query", None, 20)
 
@@ -1389,7 +1395,7 @@ class TestCallTool:
             return_value="[]",
         )
 
-        result = await call_tool("raw_query", {"query": "[:find ?e]"})
+        await call_tool("raw_query", {"query": "[:find ?e]"})
 
         mock_query.assert_called_once_with("[:find ?e]", None)
 
@@ -1420,7 +1426,7 @@ class TestCallTool:
             return_value="Backlinks",
         )
 
-        result = await call_tool("get_backlinks", {"page_title": "Page"})
+        await call_tool("get_backlinks", {"page_title": "Page"})
 
         mock_backlinks.assert_called_once_with("Page", 20)
 
@@ -1693,7 +1699,7 @@ class TestRawQuery:
         mock_roam.run_query.return_value = [["result"]]
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
 
-        result = raw_query("[:find ?e :in $ ?title :where [?e :node/title ?title]]",
+        raw_query("[:find ?e :in $ ?title :where [?e :node/title ?title]]",
                           args=["Test Page"])
 
         mock_roam.run_query.assert_called_once_with(
@@ -1762,7 +1768,7 @@ class TestGetBacklinks:
         ]
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
 
-        result = get_backlinks("Page", limit=5)
+        get_backlinks("Page", limit=5)
 
         mock_roam.get_references_to_page.assert_called_once_with("Page", 5)
 

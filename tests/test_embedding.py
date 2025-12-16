@@ -1,7 +1,6 @@
 """Unit tests for the embedding service."""
 
 import numpy as np
-import pytest
 from pytest_mock import MockerFixture
 
 from mcp_server_roam.embedding import (

@@ -1,4 +1,5 @@
 """Embedding service for semantic search using sentence-transformers."""
+from __future__ import annotations
 
 import logging
 from typing import TYPE_CHECKING
@@ -30,10 +31,10 @@ class EmbeddingService:
             model_name: Name of the sentence-transformers model to use.
         """
         self._model_name = model_name
-        self._model: "SentenceTransformer | None" = None
+        self._model: SentenceTransformer | None = None
 
     @property
-    def model(self) -> "SentenceTransformer":
+    def model(self) -> SentenceTransformer:
         """Lazily load and return the embedding model."""
         if self._model is None:
             logger.info("Loading embedding model: %s", self._model_name)
@@ -50,7 +51,7 @@ class EmbeddingService:
 
     def embed_texts(
         self, texts: list[str], batch_size: int = DEFAULT_BATCH_SIZE
-    ) -> "NDArray[np.float32]":
+    ) -> NDArray[np.float32]:
         """Generate embeddings for a list of texts.
 
         Args:
@@ -72,7 +73,7 @@ class EmbeddingService:
         )
         return embeddings.astype(np.float32)
 
-    def embed_single(self, text: str) -> "NDArray[np.float32]":
+    def embed_single(self, text: str) -> NDArray[np.float32]:
         """Generate embedding for a single text.
 
         Args:

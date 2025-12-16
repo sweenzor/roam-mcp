@@ -5,14 +5,12 @@ import time
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
-
-logger = logging.getLogger(__name__)
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 
-from mcp_server_roam.embedding import EmbeddingService, get_embedding_service
+from mcp_server_roam.embedding import get_embedding_service
 from mcp_server_roam.roam_api import (
     ORDINAL_DATE_FORMATS,
     BlockNotFoundError,
@@ -22,7 +20,9 @@ from mcp_server_roam.roam_api import (
     RoamAPIError,
     ordinal_suffix,
 )
-from mcp_server_roam.vector_store import SyncStatus, VectorStore, get_vector_store
+from mcp_server_roam.vector_store import SyncStatus, get_vector_store
+
+logger = logging.getLogger(__name__)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -330,7 +330,9 @@ def sync_index(full: bool = False) -> str:
                 store.set_sync_status(SyncStatus.IN_PROGRESS)
                 logger.debug("Incremental sync from timestamp %d", last_timestamp)
                 blocks = roam.get_blocks_modified_since(last_timestamp)
-                logger.info("Found %d modified blocks for incremental sync", len(blocks))
+                logger.info(
+                    "Found %d modified blocks for incremental sync", len(blocks)
+                )
 
         if not blocks:
             store.set_sync_status(SyncStatus.COMPLETED)
@@ -768,7 +770,7 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_block_context",
-            description="Get a block with its surrounding context (parent chain, children)",
+            description="Get a block with its context (parent chain, children)",
             inputSchema=GetBlockContext.model_json_schema(),
         ),
         Tool(

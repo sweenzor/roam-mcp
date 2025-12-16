@@ -1391,9 +1391,8 @@ class TestSearchBlocksByText:
 
         with patch.object(
             api, "run_query", side_effect=AuthenticationError("Auth failed")
-        ):
-            with pytest.raises(AuthenticationError):
-                api.search_blocks_by_text("query")
+        ), pytest.raises(AuthenticationError):
+            api.search_blocks_by_text("query")
 
     def test_search_blocks_by_text_invalid_query_raises(self) -> None:
         """Test text search raises on invalid query error."""
@@ -1401,6 +1400,5 @@ class TestSearchBlocksByText:
 
         with patch.object(
             api, "run_query", side_effect=InvalidQueryError("Invalid")
-        ):
-            with pytest.raises(InvalidQueryError):
-                api.search_blocks_by_text("[:find")
+        ), pytest.raises(InvalidQueryError):
+            api.search_blocks_by_text("[:find")

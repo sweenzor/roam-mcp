@@ -353,7 +353,8 @@ class RoamAPI:
         # Re-raise the last rate limit error if all retries exhausted
         if last_rate_limit_error:
             raise last_rate_limit_error
-        raise RuntimeError("Rate limit retry logic failed unexpectedly")  # pragma: no cover
+        # Should never reach here, but satisfies type checker
+        raise RuntimeError("Rate limit retry failed")  # pragma: no cover
 
     def _call_once(self, path: str, body: dict[str, Any]) -> requests.Response:
         """Make a single API call to Roam (internal method).
