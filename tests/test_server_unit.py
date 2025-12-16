@@ -24,9 +24,11 @@ from mcp_server_roam.server import (
     roam_debug_daily_notes,
     roam_get_page_markdown,
     roam_hello_world,
+    roam_sync_index,
     serve,
     server,
 )
+from mcp_server_roam.vector_store import SyncStatus
 
 ROAM_CLIENT_PATH = "mcp_server_roam.server.get_roam_client"
 
@@ -578,6 +580,189 @@ class TestRoamDebugDailyNotes:
         assert "%B %dth, %Y" in result
 
 
+# Tests for roam_sync_index
+class TestRoamSyncIndex:
+    """Tests for roam_sync_index function."""
+
+    def test_sync_index_full_sync(self, mocker: MockerFixture) -> None:
+        """Test full sync when explicitly requested."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_all_blocks_for_sync.return_value = [
+            {"uid": "b1", "content": "Test", "page_title": "P1", "edit_time": 1000}
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.format_block_for_embedding.return_value = "formatted"
+        mock_embedding.embed_texts.return_value = np.array([[0.1] * 384])
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_sync_index(full=True)
+
+        assert "Full sync completed" in result
+        mock_store.drop_all_data.assert_called_once()
+        mock_roam.get_all_blocks_for_sync.assert_called_once()
+
+    def test_sync_index_incremental(self, mocker: MockerFixture) -> None:
+        """Test incremental sync when previous sync exists."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = [
+            {"uid": "b1", "content": "Test", "page_title": "P1", "edit_time": 2000}
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.format_block_for_embedding.return_value = "formatted"
+        mock_embedding.embed_texts.return_value = np.array([[0.1] * 384])
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_sync_index(full=False)
+
+        assert "Incremental sync completed" in result
+        mock_roam.get_blocks_modified_since.assert_called_once_with(1000)
+
+    def test_sync_index_no_blocks(self, mocker: MockerFixture) -> None:
+        """Test sync when no blocks to process."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_blocks_modified_since.return_value = []
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = 1000
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mocker.patch("mcp_server_roam.server.get_embedding_service")
+
+        result = roam_sync_index(full=False)
+
+        assert "No blocks to sync" in result
+
+    def test_sync_index_not_initialized(self, mocker: MockerFixture) -> None:
+        """Test full sync when store is not initialized."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_all_blocks_for_sync.return_value = [
+            {"uid": "b1", "content": "Test", "page_title": "P1", "edit_time": 1000}
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.format_block_for_embedding.return_value = "formatted"
+        mock_embedding.embed_texts.return_value = np.array([[0.1] * 384])
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_sync_index(full=False)
+
+        assert "Full sync completed" in result
+        mock_store.drop_all_data.assert_called_once()
+
+    def test_sync_index_api_error(self, mocker: MockerFixture) -> None:
+        """Test error handling for API errors."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_all_blocks_for_sync.side_effect = RoamAPIError("API Error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mocker.patch("mcp_server_roam.server.get_embedding_service")
+
+        result = roam_sync_index(full=True)
+
+        assert "Error during sync" in result
+        assert "API Error" in result
+
+    def test_sync_index_unexpected_error(self, mocker: MockerFixture) -> None:
+        """Test error handling for unexpected errors."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_all_blocks_for_sync.side_effect = ValueError("Unexpected")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mocker.patch("mcp_server_roam.server.get_embedding_service")
+
+        result = roam_sync_index(full=True)
+
+        assert "Unexpected error" in result
+
+    def test_sync_index_no_timestamp_does_full(self, mocker: MockerFixture) -> None:
+        """Test full sync when no previous timestamp exists."""
+        import numpy as np
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_all_blocks_for_sync.return_value = [
+            {"uid": "b1", "content": "Test", "page_title": "P1", "edit_time": 1000}
+        ]
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.COMPLETED
+        mock_store.get_last_sync_timestamp.return_value = None
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.format_block_for_embedding.return_value = "formatted"
+        mock_embedding.embed_texts.return_value = np.array([[0.1] * 384])
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = roam_sync_index(full=False)
+
+        # Should do full sync since no timestamp
+        mock_roam.get_all_blocks_for_sync.assert_called_once()
+
+
 # Tests for call_tool
 class TestCallTool:
     """Tests for call_tool handler."""
@@ -652,6 +837,33 @@ class TestCallTool:
         assert "Daily Notes Debug" in result[0].text
 
     @pytest.mark.asyncio
+    async def test_call_tool_sync_index(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles sync_index."""
+        mock_sync = mocker.patch(
+            "mcp_server_roam.server.roam_sync_index",
+            return_value="Sync completed",
+        )
+
+        result = await call_tool("roam_sync_index", {"full": True})
+
+        assert len(result) == 1
+        assert "Sync completed" in result[0].text
+        mock_sync.assert_called_once_with(True)
+
+    @pytest.mark.asyncio
+    async def test_call_tool_sync_index_default(self, mocker: MockerFixture) -> None:
+        """Test call_tool handles sync_index with default args."""
+        mock_sync = mocker.patch(
+            "mcp_server_roam.server.roam_sync_index",
+            return_value="Sync completed",
+        )
+
+        result = await call_tool("roam_sync_index", {})
+
+        assert len(result) == 1
+        mock_sync.assert_called_once_with(False)
+
+    @pytest.mark.asyncio
     async def test_call_tool_unknown_tool(self) -> None:
         """Test call_tool raises error for unknown tool."""
         with pytest.raises(ValueError) as exc_info:
@@ -674,7 +886,8 @@ class TestListTools:
         assert "roam_create_block" in tool_names
         assert "roam_context" in tool_names
         assert "roam_debug_daily_notes" in tool_names
-        assert len(tools) == 5
+        assert "roam_sync_index" in tool_names
+        assert len(tools) == 6
 
 
 # Tests for serve function

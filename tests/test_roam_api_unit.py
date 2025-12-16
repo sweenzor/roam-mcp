@@ -1221,3 +1221,95 @@ class TestExceptionClasses:
         """Test InvalidQueryError inherits from RoamAPIError."""
         error = InvalidQueryError("Invalid query")
         assert isinstance(error, RoamAPIError)
+
+
+class TestBulkFetchMethods:
+    """Tests for bulk fetch methods used by sync_index."""
+
+    def test_get_all_blocks_for_sync_success(self) -> None:
+        """Test fetching all blocks for sync."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_results = [
+            ["uid1", "content 1", 1000, "page-uid-1", "Page 1"],
+            ["uid2", "content 2", 2000, "page-uid-2", "Page 2"],
+        ]
+
+        with patch.object(api, "run_query", return_value=mock_results) as mock_query:
+            blocks = api.get_all_blocks_for_sync()
+
+            assert len(blocks) == 2
+            assert blocks[0] == {
+                "uid": "uid1",
+                "content": "content 1",
+                "edit_time": 1000,
+                "page_uid": "page-uid-1",
+                "page_title": "Page 1",
+            }
+            assert blocks[1]["uid"] == "uid2"
+            mock_query.assert_called_once()
+
+    def test_get_all_blocks_for_sync_empty(self) -> None:
+        """Test fetching all blocks when none exist."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[]):
+            blocks = api.get_all_blocks_for_sync()
+            assert blocks == []
+
+    def test_get_blocks_modified_since_success(self) -> None:
+        """Test fetching blocks modified since a timestamp."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_results = [
+            ["uid1", "content 1", 2000, "page-uid-1", "Page 1"],
+        ]
+
+        with patch.object(api, "run_query", return_value=mock_results) as mock_query:
+            blocks = api.get_blocks_modified_since(1500)
+
+            assert len(blocks) == 1
+            assert blocks[0]["uid"] == "uid1"
+            # Verify the query includes the timestamp filter
+            query_arg = mock_query.call_args[0][0]
+            assert "1500" in query_arg
+
+    def test_get_blocks_modified_since_empty(self) -> None:
+        """Test fetching modified blocks when none exist."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[]):
+            blocks = api.get_blocks_modified_since(1500)
+            assert blocks == []
+
+    def test_get_block_parent_chain_success(self) -> None:
+        """Test fetching parent chain for a block."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_results = [
+            ["Parent 1", 0],
+            ["Parent 2", 1],
+            ["Parent 3", 2],
+        ]
+
+        with patch.object(api, "run_query", return_value=mock_results):
+            chain = api.get_block_parent_chain("block-uid")
+
+            # Should be sorted by order
+            assert chain == ["Parent 1", "Parent 2", "Parent 3"]
+
+    def test_get_block_parent_chain_empty(self) -> None:
+        """Test fetching parent chain when block has no parents."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", return_value=[]):
+            chain = api.get_block_parent_chain("block-uid")
+            assert chain == []
+
+    def test_get_block_parent_chain_api_error(self) -> None:
+        """Test parent chain returns empty on API error."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "run_query", side_effect=RoamAPIError("API Error")):
+            chain = api.get_block_parent_chain("block-uid")
+            assert chain == []

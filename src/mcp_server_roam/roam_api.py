@@ -785,3 +785,106 @@ class RoamAPI:
                 )
 
         return result
+
+    def get_all_blocks_for_sync(self) -> list[dict[str, Any]]:
+        """Fetch all blocks with metadata for vector index sync.
+
+        Returns:
+            List of block dictionaries with keys:
+                - uid: Block UID
+                - content: Block text content
+                - edit_time: Edit timestamp in milliseconds
+                - page_uid: UID of the containing page
+                - page_title: Title of the containing page
+        """
+        query = """[:find ?uid ?string ?edit-time ?page-uid ?page-title
+                    :where
+                    [?b :block/uid ?uid]
+                    [?b :block/string ?string]
+                    [?b :edit/time ?edit-time]
+                    [?b :block/page ?page]
+                    [?page :block/uid ?page-uid]
+                    [?page :node/title ?page-title]]"""
+
+        results = self.run_query(query)
+        blocks = []
+        for row in results:
+            uid, content, edit_time, page_uid, page_title = row
+            blocks.append({
+                "uid": uid,
+                "content": content,
+                "edit_time": edit_time,
+                "page_uid": page_uid,
+                "page_title": page_title,
+            })
+
+        logger.info("Fetched %d blocks for sync", len(blocks))
+        return blocks
+
+    def get_blocks_modified_since(self, timestamp: int) -> list[dict[str, Any]]:
+        """Fetch blocks modified since a given timestamp.
+
+        Args:
+            timestamp: Timestamp in milliseconds since epoch.
+
+        Returns:
+            List of block dictionaries (same format as get_all_blocks_for_sync).
+        """
+        query = f"""[:find ?uid ?string ?edit-time ?page-uid ?page-title
+                     :where
+                     [?b :block/uid ?uid]
+                     [?b :block/string ?string]
+                     [?b :edit/time ?edit-time]
+                     [(> ?edit-time {timestamp})]
+                     [?b :block/page ?page]
+                     [?page :block/uid ?page-uid]
+                     [?page :node/title ?page-title]]"""
+
+        results = self.run_query(query)
+        blocks = []
+        for row in results:
+            uid, content, edit_time, page_uid, page_title = row
+            blocks.append({
+                "uid": uid,
+                "content": content,
+                "edit_time": edit_time,
+                "page_uid": page_uid,
+                "page_title": page_title,
+            })
+
+        logger.info("Fetched %d blocks modified since %d", len(blocks), timestamp)
+        return blocks
+
+    def get_block_parent_chain(self, block_uid: str) -> list[str]:
+        """Get parent block content strings from root to immediate parent.
+
+        Args:
+            block_uid: UID of the block to get parents for.
+
+        Returns:
+            List of parent block content strings, ordered from root to immediate
+            parent. Returns empty list if block has no parents or is not found.
+        """
+        # Sanitize input
+        sanitized_uid = self._sanitize_query_input(block_uid)
+
+        # Query to get all ancestors with their order values
+        # Uses Roam's :block/parents attribute which contains all ancestors
+        query = f"""[:find ?parent-string ?parent-order
+                     :where
+                     [?b :block/uid "{sanitized_uid}"]
+                     [?b :block/parents ?parent]
+                     [?parent :block/string ?parent-string]
+                     [?parent :block/order ?parent-order]]"""
+
+        try:
+            results = self.run_query(query)
+            if not results:
+                return []
+
+            # Sort by order (lower order = closer to root)
+            sorted_parents = sorted(results, key=lambda x: x[1])
+            return [parent[0] for parent in sorted_parents]
+        except RoamAPIError as e:
+            logger.warning("Error getting parent chain for %s: %s", block_uid, e)
+            return []

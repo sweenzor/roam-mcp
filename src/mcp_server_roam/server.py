@@ -1,5 +1,5 @@
 """MCP server implementation for Roam Research API."""
-
+import time
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
@@ -8,6 +8,7 @@ from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
 from pydantic import BaseModel
 
+from mcp_server_roam.embedding import EmbeddingService, get_embedding_service
 from mcp_server_roam.roam_api import (
     ORDINAL_DATE_FORMATS,
     InvalidQueryError,
@@ -16,6 +17,7 @@ from mcp_server_roam.roam_api import (
     RoamAPIError,
     ordinal_suffix,
 )
+from mcp_server_roam.vector_store import SyncStatus, VectorStore, get_vector_store
 
 # Load environment variables from .env file
 load_dotenv()
@@ -68,6 +70,12 @@ class RoamDebugDailyNotes(BaseModel):
     """Input schema for debug_daily_notes tool."""
 
     pass
+
+
+class RoamSyncIndex(BaseModel):
+    """Input schema for sync_index tool."""
+
+    full: bool = False
 
 
 # Tool implementation functions
@@ -227,6 +235,102 @@ def roam_debug_daily_notes() -> str:
         return f"Error: {str(e)}"
 
 
+# Constants for sync_index
+SYNC_BATCH_SIZE = 64
+SYNC_COMMIT_INTERVAL = 500
+
+
+def roam_sync_index(full: bool = False) -> str:
+    """Build or update the vector index for semantic search.
+
+    Args:
+        full: If True, perform a full resync (drops existing data).
+
+    Returns:
+        Status message with sync statistics.
+    """
+    start_time = time.time()
+
+    try:
+        roam = get_roam_client()
+        store = get_vector_store(roam.graph_name)
+        embedding_service = get_embedding_service()
+
+        # Check current sync status
+        current_status = store.get_sync_status()
+
+        # Determine if we need a full sync
+        do_full_sync = full or current_status == SyncStatus.NOT_INITIALIZED
+
+        if do_full_sync:
+            store.drop_all_data()
+            store.set_sync_status(SyncStatus.IN_PROGRESS)
+            blocks = roam.get_all_blocks_for_sync()
+        else:
+            # Incremental sync - get blocks modified since last sync
+            last_timestamp = store.get_last_sync_timestamp()
+            if last_timestamp is None:
+                # No previous sync, do full
+                store.set_sync_status(SyncStatus.IN_PROGRESS)
+                blocks = roam.get_all_blocks_for_sync()
+            else:
+                store.set_sync_status(SyncStatus.IN_PROGRESS)
+                blocks = roam.get_blocks_modified_since(last_timestamp)
+
+        if not blocks:
+            store.set_sync_status(SyncStatus.COMPLETED)
+            elapsed = time.time() - start_time
+            return f"No blocks to sync. Completed in {elapsed:.1f}s."
+
+        # Store block metadata
+        store.upsert_blocks(blocks)
+
+        # Generate and store embeddings in batches
+        total_embedded = 0
+        for i in range(0, len(blocks), SYNC_BATCH_SIZE):
+            batch = blocks[i:i + SYNC_BATCH_SIZE]
+
+            # Format blocks for embedding with context
+            texts = []
+            uids = []
+            for block in batch:
+                # Get parent chain for context (skip for now to avoid rate limits)
+                # parent_chain = roam.get_block_parent_chain(block["uid"])
+                parent_chain = None
+
+                formatted_text = embedding_service.format_block_for_embedding(
+                    content=block["content"],
+                    page_title=block.get("page_title"),
+                    parent_chain=parent_chain,
+                )
+                texts.append(formatted_text)
+                uids.append(block["uid"])
+
+            # Generate embeddings
+            embeddings = embedding_service.embed_texts(texts)
+
+            # Store embeddings
+            store.upsert_embeddings(uids, embeddings)
+            total_embedded += len(uids)
+
+        # Update sync timestamp to the latest edit_time
+        max_edit_time = max(b["edit_time"] for b in blocks if b.get("edit_time"))
+        store.set_last_sync_timestamp(max_edit_time)
+        store.set_sync_status(SyncStatus.COMPLETED)
+
+        elapsed = time.time() - start_time
+        sync_type = "Full" if do_full_sync else "Incremental"
+        return (
+            f"{sync_type} sync completed in {elapsed:.1f}s. "
+            f"Processed {len(blocks)} blocks, embedded {total_embedded}."
+        )
+
+    except RoamAPIError as e:
+        return f"Error during sync: {str(e)}"
+    except Exception as e:
+        return f"Unexpected error during sync: {str(e)}"
+
+
 # Create the server instance - this is what mcp dev looks for
 server = Server("mcp-roam")
 
@@ -265,6 +369,11 @@ async def list_tools() -> list[Tool]:
             description="Debug daily note formats and show what daily notes exist",
             inputSchema=RoamDebugDailyNotes.model_json_schema(),
         ),
+        Tool(
+            name="roam_sync_index",
+            description="Build or update the vector index for semantic search",
+            inputSchema=RoamSyncIndex.model_json_schema(),
+        ),
     ]
 
 
@@ -297,6 +406,8 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             )
         case "roam_debug_daily_notes":
             result = roam_debug_daily_notes()
+        case "roam_sync_index":
+            result = roam_sync_index(arguments.get("full", False))
         case _:
             raise ValueError(f"Unknown tool: {name}")
 
