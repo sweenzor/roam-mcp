@@ -24,9 +24,10 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 **Pre-commit checklist**: Before committing any changes:
 1. Run the formatter: `uv run black src tests`
 2. Run the linter: `uv run ruff check src tests`
-3. Run the full test suite: `uv run pytest`
-4. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests: `uv run pytest tests/test_e2e.py -v`
-5. Fix any formatting, lint, or test failures before committing
+3. Run the type checker: `uv run pyright src`
+4. Run the full test suite: `uv run pytest`
+5. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests: `uv run pytest tests/test_e2e.py -v`
+6. Fix any formatting, lint, type, or test failures before committing
 
 **Note**: Roam API has a 50 requests/minute rate limit. E2E tests are consolidated to stay under this limit.
 
