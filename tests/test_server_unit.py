@@ -768,6 +768,42 @@ class TestRoamSyncIndex:
         # Should do full sync since no timestamp
         mock_roam.get_all_blocks_for_sync.assert_called_once()
 
+    def test_sync_index_multiple_batches_progress_logging(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test progress logging with multiple batches."""
+        import numpy as np
+
+        # Create 650 blocks to trigger 11 batches (10th batch triggers logging, then 11th)
+        blocks = [
+            {"uid": f"b{i}", "content": f"Test {i}", "page_title": "P1", "edit_time": 1000}
+            for i in range(650)
+        ]
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.graph_name = "test-graph"
+        mock_roam.get_all_blocks_for_sync.return_value = blocks
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        mock_store = mocker.MagicMock()
+        mock_store.get_sync_status.return_value = SyncStatus.NOT_INITIALIZED
+        mocker.patch(
+            "mcp_server_roam.server.get_vector_store", return_value=mock_store
+        )
+
+        mock_embedding = mocker.MagicMock()
+        mock_embedding.format_block_for_embedding.return_value = "formatted"
+        # Return embeddings for each batch
+        mock_embedding.embed_texts.return_value = np.array([[0.1] * 384] * 64)
+        mocker.patch(
+            "mcp_server_roam.server.get_embedding_service", return_value=mock_embedding
+        )
+
+        result = sync_index(full=True)
+
+        assert "Full sync completed" in result
+        assert "650 blocks" in result
+
 
 # Tests for semantic_search
 class TestRoamSemanticSearch:

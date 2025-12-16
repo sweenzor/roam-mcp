@@ -1,9 +1,12 @@
 """MCP server implementation for Roam Research API."""
 import json
+import logging
 import time
 from datetime import datetime, timedelta
 
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
@@ -301,19 +304,33 @@ def sync_index(full: bool = False) -> str:
         do_full_sync = full or current_status == SyncStatus.NOT_INITIALIZED
 
         if do_full_sync:
+            logger.info("Starting full sync - dropping existing data")
             store.drop_all_data()
             store.set_sync_status(SyncStatus.IN_PROGRESS)
+            fetch_start = time.time()
             blocks = roam.get_all_blocks_for_sync()
+            logger.info(
+                "Fetched %d blocks from Roam API in %.1fs",
+                len(blocks), time.time() - fetch_start
+            )
         else:
             # Incremental sync - get blocks modified since last sync
             last_timestamp = store.get_last_sync_timestamp()
             if last_timestamp is None:
                 # No previous sync, do full
+                logger.info("No previous sync found - performing full sync")
                 store.set_sync_status(SyncStatus.IN_PROGRESS)
+                fetch_start = time.time()
                 blocks = roam.get_all_blocks_for_sync()
+                logger.info(
+                    "Fetched %d blocks from Roam API in %.1fs",
+                    len(blocks), time.time() - fetch_start
+                )
             else:
                 store.set_sync_status(SyncStatus.IN_PROGRESS)
+                logger.debug("Incremental sync from timestamp %d", last_timestamp)
                 blocks = roam.get_blocks_modified_since(last_timestamp)
+                logger.info("Found %d modified blocks for incremental sync", len(blocks))
 
         if not blocks:
             store.set_sync_status(SyncStatus.COMPLETED)
@@ -322,10 +339,13 @@ def sync_index(full: bool = False) -> str:
 
         # Store block metadata
         store.upsert_blocks(blocks)
+        logger.debug("Stored metadata for %d blocks", len(blocks))
 
         # Generate and store embeddings in batches
+        embed_start = time.time()
         total_embedded = 0
-        for i in range(0, len(blocks), SYNC_BATCH_SIZE):
+        num_batches = (len(blocks) + SYNC_BATCH_SIZE - 1) // SYNC_BATCH_SIZE
+        for batch_num, i in enumerate(range(0, len(blocks), SYNC_BATCH_SIZE), 1):
             batch = blocks[i:i + SYNC_BATCH_SIZE]
 
             # Format blocks for embedding with context
@@ -351,21 +371,35 @@ def sync_index(full: bool = False) -> str:
             store.upsert_embeddings(uids, embeddings)
             total_embedded += len(uids)
 
+            # Log progress every 10 batches or on last batch
+            if batch_num % 10 == 0 or batch_num == num_batches:
+                logger.info(
+                    "Embedding progress: %d/%d batches (%d blocks)",
+                    batch_num, num_batches, total_embedded
+                )
+
         # Update sync timestamp to the latest edit_time
         max_edit_time = max(b["edit_time"] for b in blocks if b.get("edit_time"))
         store.set_last_sync_timestamp(max_edit_time)
         store.set_sync_status(SyncStatus.COMPLETED)
 
+        embed_elapsed = time.time() - embed_start
         elapsed = time.time() - start_time
         sync_type = "Full" if do_full_sync else "Incremental"
+        logger.info(
+            "%s sync completed: %d blocks in %.1fs (embedding: %.1fs)",
+            sync_type, total_embedded, elapsed, embed_elapsed
+        )
         return (
             f"{sync_type} sync completed in {elapsed:.1f}s. "
             f"Processed {len(blocks)} blocks, embedded {total_embedded}."
         )
 
     except RoamAPIError as e:
+        logger.error("Sync failed with RoamAPIError: %s", e)
         return f"Error during sync: {str(e)}"
     except Exception as e:
+        logger.error("Unexpected error during sync: %s", e, exc_info=True)
         return f"Unexpected error during sync: {str(e)}"
 
 
@@ -390,6 +424,9 @@ def semantic_search(
     Returns:
         Formatted search results with block content, page titles, and similarity.
     """
+    search_start = time.time()
+    logger.debug("Semantic search started: query='%s', limit=%d", query, limit)
+
     try:
         roam = get_roam_client()
         store = get_vector_store(roam.graph_name)
@@ -407,6 +444,9 @@ def semantic_search(
         if last_timestamp is not None:
             modified_blocks = roam.get_blocks_modified_since(last_timestamp)
             if modified_blocks:
+                logger.info(
+                    "Pre-search sync: updating %d modified blocks", len(modified_blocks)
+                )
                 # Sync the modified blocks
                 store.upsert_blocks(modified_blocks)
 
@@ -442,6 +482,7 @@ def semantic_search(
         )
 
         if not raw_results:
+            logger.debug("No results found for query: %s", query)
             return f"No results found for: {query}"
 
         # Apply recency boost
@@ -503,11 +544,18 @@ def semantic_search(
             output_lines.append(f"{content}")
             output_lines.append(f"*UID: {result['uid']}*\n")
 
+        elapsed = time.time() - search_start
+        logger.info(
+            "Semantic search completed: %d results in %.2fs for query='%s'",
+            len(final_results), elapsed, query[:50]
+        )
         return "\n".join(output_lines)
 
     except RoamAPIError as e:
+        logger.error("Search failed with RoamAPIError: %s", e)
         return f"Error during search: {str(e)}"
     except Exception as e:
+        logger.error("Unexpected error during search: %s", e, exc_info=True)
         return f"Unexpected error during search: {str(e)}"
 
 

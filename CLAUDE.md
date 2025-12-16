@@ -288,6 +288,31 @@ Roam uses Datalog for querying its graph database. Key aspects:
 - Use try/except blocks to prevent tool failures from crashing the server
 - Add logging to help debug API interactions
 - Handle cases where pages or blocks are not found
+- **Automatic retry with backoff**:
+  - Network errors (ConnectionError, Timeout): 3 retries with exponential backoff (1s, 2s, 4s)
+  - Rate limits (HTTP 429): 3 retries with longer backoff (10s, 20s, 40s)
+
+## Performance Tuning
+
+Key constants that can be adjusted for different graph sizes:
+
+| Constant | File | Default | Description |
+|----------|------|---------|-------------|
+| `SYNC_BATCH_SIZE` | server.py | 64 | Blocks embedded per batch during sync |
+| `SYNC_COMMIT_INTERVAL` | server.py | 500 | Blocks between database commits |
+| `DEFAULT_BATCH_SIZE` | embedding.py | 64 | Batch size for embedding model |
+| `SEARCH_MIN_SIMILARITY` | server.py | 0.3 | Minimum cosine similarity threshold |
+| `RECENCY_BOOST_DAYS` | server.py | 30 | Days over which recency boost decays |
+| `RECENCY_BOOST_MAX` | server.py | 0.1 | Maximum recency boost added to similarity |
+| `MAX_RETRIES` | roam_api.py | 3 | Network error retry attempts |
+| `RATE_LIMIT_RETRIES` | roam_api.py | 3 | Rate limit retry attempts |
+| `REQUEST_TIMEOUT_SECONDS` | roam_api.py | 30 | HTTP request timeout |
+
+**Tuning recommendations:**
+- For larger graphs (>100k blocks): Increase `SYNC_BATCH_SIZE` to 128 if memory allows
+- For slower connections: Increase `REQUEST_TIMEOUT_SECONDS` to 60
+- For stricter search results: Increase `SEARCH_MIN_SIMILARITY` to 0.4-0.5
+- For more recent content priority: Increase `RECENCY_BOOST_MAX` to 0.15-0.2
 
 ## Testing
 - **Unit tests**: `test_server.py`, `test_server_unit.py` - run without API credentials

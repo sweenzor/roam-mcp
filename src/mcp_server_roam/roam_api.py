@@ -26,6 +26,8 @@ MAX_BACKOFF_SECONDS = 16.0
 # API configuration constants
 DEFAULT_MAX_REFERENCES = 20
 REQUEST_TIMEOUT_SECONDS = 30
+RATE_LIMIT_RETRIES = 3
+RATE_LIMIT_INITIAL_BACKOFF = 10.0  # Roam rate limit is 50 req/min, so wait longer
 
 # Date format constants for daily notes
 # These are the common formats used by Roam Research for daily note page titles
@@ -309,6 +311,9 @@ class RoamAPI:
     def call(self, path: str, body: dict[str, Any]) -> requests.Response:
         """Make an API call to Roam, following redirects if necessary.
 
+        Includes automatic retry logic for rate limit errors (HTTP 429) with
+        exponential backoff.
+
         Args:
             path: API endpoint path.
             body: Request body data.
@@ -320,8 +325,51 @@ class RoamAPI:
             InvalidQueryError: If redirect URL cannot be parsed or redirect has
                 no Location header.
             AuthenticationError: If authentication fails (HTTP 401).
-            RateLimitError: If rate limit is exceeded (HTTP 429).
+            RateLimitError: If rate limit is exceeded after all retries.
             RoamAPIError: For other API errors (HTTP 400, 500, etc).
+        """
+        backoff = RATE_LIMIT_INITIAL_BACKOFF
+        last_rate_limit_error: RateLimitError | None = None
+
+        for attempt in range(RATE_LIMIT_RETRIES + 1):
+            try:
+                return self._call_once(path, body)
+            except RateLimitError as e:
+                last_rate_limit_error = e
+                if attempt < RATE_LIMIT_RETRIES:
+                    logger.warning(
+                        "Rate limit hit (attempt %d/%d). Waiting %.1fs before retry...",
+                        attempt + 1,
+                        RATE_LIMIT_RETRIES + 1,
+                        backoff,
+                    )
+                    time.sleep(backoff)
+                    backoff = min(backoff * BACKOFF_MULTIPLIER, MAX_BACKOFF_SECONDS * 4)
+                else:
+                    logger.error(
+                        "Rate limit exceeded after %d attempts", RATE_LIMIT_RETRIES + 1
+                    )
+
+        # Re-raise the last rate limit error if all retries exhausted
+        if last_rate_limit_error:
+            raise last_rate_limit_error
+        raise RuntimeError("Rate limit retry logic failed unexpectedly")  # pragma: no cover
+
+    def _call_once(self, path: str, body: dict[str, Any]) -> requests.Response:
+        """Make a single API call to Roam (internal method).
+
+        Args:
+            path: API endpoint path.
+            body: Request body data.
+
+        Returns:
+            Response object.
+
+        Raises:
+            InvalidQueryError: If redirect URL cannot be parsed.
+            AuthenticationError: If authentication fails (HTTP 401).
+            RateLimitError: If rate limit is exceeded (HTTP 429).
+            RoamAPIError: For other API errors.
         """
         base_url = self._redirect_cache.get(
             self.graph_name, "https://api.roamresearch.com"
@@ -333,9 +381,9 @@ class RoamAPI:
             "x-authorization": f"Bearer {self.api_token}",
         }
 
-        logger.info("Making POST request to: %s", url)
+        logger.debug("Making POST request to: %s", url)
         masked_token = self._mask_token(self.api_token)
-        logger.info("Request headers: Authorization: Bearer %s", masked_token)
+        logger.debug("Request headers: Authorization: Bearer %s", masked_token)
 
         resp = self._make_request(url, headers, body)
 
@@ -356,7 +404,7 @@ class RoamAPI:
             redirect_url = f"https://{peer}.api.roamresearch.com:{port}"
             self._redirect_cache[self.graph_name] = redirect_url
             logger.info("Cached redirect URL: %s", redirect_url)
-            return self.call(path, body)
+            return self._call_once(path, body)
 
         # Handle errors
         if not resp.ok:
@@ -371,8 +419,7 @@ class RoamAPI:
                     "Authentication error (HTTP 401): Invalid token"
                 )
             elif resp.status_code == 429:
-                msg = f"Rate limit exceeded (HTTP 429): {resp.text}"
-                raise RateLimitError(msg)
+                raise RateLimitError(f"Rate limit exceeded (HTTP 429): {resp.text}")
             else:
                 raise RoamAPIError(
                     f"Service unavailable (HTTP {resp.status_code}): "

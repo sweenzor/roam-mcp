@@ -281,6 +281,9 @@ class VectorStore:
                 - parent_chain: List of parent content strings
                 - similarity: Cosine similarity score (0-1)
         """
+        logger.debug(
+            "Vector search: limit=%d, min_similarity=%.2f", limit, min_similarity
+        )
         # sqlite-vec uses L2 distance, convert to similarity
         # For normalized vectors: similarity = 1 - (distance^2 / 2)
         # Note: sqlite-vec requires k = ? parameter for KNN queries
@@ -322,6 +325,7 @@ class VectorStore:
                 "similarity": similarity,
             })
 
+        logger.debug("Vector search returned %d results", len(results))
         return results
 
     def get_blocks_needing_embedding(self, limit: int = 1000) -> list[dict]:
