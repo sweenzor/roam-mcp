@@ -38,10 +38,11 @@ class TestEmbeddingService:
         mock_model = mocker.MagicMock()
         mock_transformer.return_value = mock_model
 
-        mocker.patch(
-            "sentence_transformers.SentenceTransformer",
-            mock_transformer,
-        )
+        # Patch sys.modules to avoid importing the real sentence_transformers
+        # (which loads PyTorch and takes ~28 seconds)
+        mock_st_module = mocker.MagicMock()
+        mock_st_module.SentenceTransformer = mock_transformer
+        mocker.patch.dict("sys.modules", {"sentence_transformers": mock_st_module})
 
         service = EmbeddingService()
 
@@ -61,10 +62,10 @@ class TestEmbeddingService:
         mock_model = mocker.MagicMock()
         mock_transformer.return_value = mock_model
 
-        mocker.patch(
-            "sentence_transformers.SentenceTransformer",
-            mock_transformer,
-        )
+        # Patch sys.modules to avoid importing the real sentence_transformers
+        mock_st_module = mocker.MagicMock()
+        mock_st_module.SentenceTransformer = mock_transformer
+        mocker.patch.dict("sys.modules", {"sentence_transformers": mock_st_module})
 
         service = EmbeddingService()
 
@@ -95,10 +96,10 @@ class TestEmbeddingService:
         mock_embeddings = np.array([[0.1, 0.2, 0.3] * 128], dtype=np.float64)
         mock_model.encode.return_value = mock_embeddings
 
-        mocker.patch(
-            "sentence_transformers.SentenceTransformer",
-            mock_transformer,
-        )
+        # Patch sys.modules to avoid importing the real sentence_transformers
+        mock_st_module = mocker.MagicMock()
+        mock_st_module.SentenceTransformer = mock_transformer
+        mocker.patch.dict("sys.modules", {"sentence_transformers": mock_st_module})
 
         service = EmbeddingService()
         result = service.embed_texts(["test text"])
@@ -129,10 +130,10 @@ class TestEmbeddingService:
         )
         mock_model.encode.return_value = mock_embeddings
 
-        mocker.patch(
-            "sentence_transformers.SentenceTransformer",
-            mock_transformer,
-        )
+        # Patch sys.modules to avoid importing the real sentence_transformers
+        mock_st_module = mocker.MagicMock()
+        mock_st_module.SentenceTransformer = mock_transformer
+        mocker.patch.dict("sys.modules", {"sentence_transformers": mock_st_module})
 
         service = EmbeddingService()
         result = service.embed_texts(["text1", "text2", "text3"])
@@ -149,10 +150,10 @@ class TestEmbeddingService:
         mock_embeddings = np.array([[0.1] * EMBEDDING_DIMENSIONS], dtype=np.float32)
         mock_model.encode.return_value = mock_embeddings
 
-        mocker.patch(
-            "sentence_transformers.SentenceTransformer",
-            mock_transformer,
-        )
+        # Patch sys.modules to avoid importing the real sentence_transformers
+        mock_st_module = mocker.MagicMock()
+        mock_st_module.SentenceTransformer = mock_transformer
+        mocker.patch.dict("sys.modules", {"sentence_transformers": mock_st_module})
 
         service = EmbeddingService()
         service.embed_texts(["test"], batch_size=32)
@@ -173,10 +174,10 @@ class TestEmbeddingService:
         mock_embeddings = np.array([[0.1] * EMBEDDING_DIMENSIONS], dtype=np.float32)
         mock_model.encode.return_value = mock_embeddings
 
-        mocker.patch(
-            "sentence_transformers.SentenceTransformer",
-            mock_transformer,
-        )
+        # Patch sys.modules to avoid importing the real sentence_transformers
+        mock_st_module = mocker.MagicMock()
+        mock_st_module.SentenceTransformer = mock_transformer
+        mocker.patch.dict("sys.modules", {"sentence_transformers": mock_st_module})
 
         service = EmbeddingService()
         result = service.embed_single("test text")
