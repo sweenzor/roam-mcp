@@ -1,6 +1,16 @@
 # MCP Server for Roam Research
 
-A Model Context Protocol (MCP) server that provides programmatic access to Roam Research functionality via LLMs.
+A Model Context Protocol (MCP) server that provides access to Roam Research functionality for LLMs.
+
+## Features
+
+- **Semantic Search** — Find relevant blocks by meaning, not just keywords. Built on [sentence-transformers](https://www.sbert.net/) and [sqlite-vec](https://github.com/asg017/sqlite-vec), the vector index captures the semantic relationships in your notes. Recent content gets a recency boost, and results include parent context so you understand where each block lives in your graph.
+
+- **Daily Notes Context** — Understand your recent work at a glance. Fetches daily notes along with all blocks that reference them, automatically detecting your date format.
+
+- **Full Graph Access** — Read pages as clean markdown, execute Datalog queries, and traverse backlinks. Works with unlimited nesting depth.
+
+- **Incremental Sync** — The semantic index updates automatically, only processing new or modified blocks. Initial indexing handles ~90k blocks in about 6 minutes; subsequent syncs take seconds.
 
 ## Installation
 
