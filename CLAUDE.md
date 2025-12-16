@@ -22,9 +22,10 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - MCP install to Claude Desktop: `uv run mcp install`
 
 **Pre-commit checklist**: Before committing any changes:
-1. Run the full test suite: `uv run pytest`
-2. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests: `uv run pytest tests/test_e2e.py -v`
-3. Fix any failing tests - do not disable or delete tests to make them pass
+1. Run the linter: `uv run ruff check src tests`
+2. Run the full test suite: `uv run pytest`
+3. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests: `uv run pytest tests/test_e2e.py -v`
+4. Fix any lint or test failures before committing
 
 **Note**: Roam API has a 50 requests/minute rate limit. E2E tests are consolidated to stay under this limit.
 
