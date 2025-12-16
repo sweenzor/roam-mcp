@@ -2,6 +2,7 @@
 
 import json
 import tempfile
+from collections.abc import Generator
 from pathlib import Path
 
 import numpy as np
@@ -24,9 +25,9 @@ def temp_db_path() -> Path:
 
 
 @pytest.fixture
-def vector_store(temp_db_path: Path) -> VectorStore:
-    """Create a VectorStore instance with a temporary database."""
-    store = VectorStore("test-graph", db_path=temp_db_path)
+def vector_store() -> Generator[VectorStore, None, None]:
+    """Create a VectorStore instance with in-memory database for fast tests."""
+    store = VectorStore("test-graph", db_path=Path(":memory:"))
     yield store
     store.close()
 
