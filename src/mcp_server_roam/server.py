@@ -4,6 +4,7 @@ import json
 import logging
 import time
 from datetime import datetime, timedelta
+from typing import Any
 
 from dotenv import load_dotenv
 from mcp.server import Server
@@ -110,7 +111,7 @@ class RawQuery(BaseModel):
     """Input schema for raw_query tool."""
 
     query: str
-    args: list | None = None
+    args: list[Any] | None = None
 
 
 class GetBacklinks(BaseModel):
@@ -667,7 +668,7 @@ def search_by_text(text: str, page_title: str | None = None, limit: int = 20) ->
         return f"Error searching blocks: {str(e)}"
 
 
-def raw_query(query: str, args: list | None = None) -> str:
+def raw_query(query: str, args: list[Any] | None = None) -> str:
     """Execute an arbitrary Datalog query against the Roam graph.
 
     Args:

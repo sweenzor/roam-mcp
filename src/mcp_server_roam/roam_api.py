@@ -429,7 +429,7 @@ class RoamAPI:
 
         return resp
 
-    def run_query(self, query: str, args: dict[str, Any] | None = None) -> list[Any]:
+    def run_query(self, query: str, args: list[Any] | None = None) -> list[Any]:
         """Run a Datalog query on the Roam graph.
 
         Args:
