@@ -242,9 +242,9 @@ class TestSemanticSearchE2E:
                 "Trump",
                 "Biden",
             ]
-            assert any(name in text for name in us_president_names), (
-                "Expected to find at least one US president name in results"
-            )
+            assert any(
+                name in text for name in us_president_names
+            ), "Expected to find at least one US president name in results"
 
             # Enrichments should be present
             assert "**Modified:**" in text
