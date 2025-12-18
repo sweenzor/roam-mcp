@@ -990,3 +990,136 @@ class RoamAPI:
         except RoamAPIError as e:
             logger.warning("Error getting parent chain for %s: %s", block_uid, e)
             return []
+
+    def get_block_children_preview(
+        self, block_uid: str, limit: int = 3
+    ) -> list[dict[str, Any]]:
+        """Get first N children of a block for preview.
+
+        Args:
+            block_uid: UID of the parent block.
+            limit: Maximum number of children to return.
+
+        Returns:
+            List of child block dicts with 'uid' and 'content' keys.
+        """
+        sanitized_uid = self._sanitize_query_input(block_uid)
+
+        query = f"""[:find ?child-uid ?child-string ?child-order
+                     :where
+                     [?b :block/uid "{sanitized_uid}"]
+                     [?b :block/children ?child]
+                     [?child :block/uid ?child-uid]
+                     [?child :block/string ?child-string]
+                     [?child :block/order ?child-order]]"""
+
+        try:
+            results = self.run_query(query)
+            if not results:
+                return []
+
+            # Sort by order and limit
+            sorted_children = sorted(results, key=lambda x: x[2])[:limit]
+            return [{"uid": child[0], "content": child[1]} for child in sorted_children]
+        except RoamAPIError as e:
+            logger.warning("Error getting children for %s: %s", block_uid, e)
+            return []
+
+    def get_block_reference_count(self, block_uid: str) -> int:
+        """Get count of blocks that reference a specific block.
+
+        Args:
+            block_uid: UID of the block to count references for.
+
+        Returns:
+            Number of blocks referencing this block.
+        """
+        sanitized_uid = self._sanitize_query_input(block_uid)
+
+        # Search for blocks containing (( block_uid )) reference
+        query = f"""[:find (count ?b)
+                     :where
+                     [?b :block/string ?string]
+                     [(clojure.string/includes? ?string "(({sanitized_uid}))")]
+                     ]"""
+
+        try:
+            results = self.run_query(query)
+            if results and results[0]:
+                return results[0][0]
+            return 0
+        except RoamAPIError as e:
+            logger.warning("Error getting reference count for %s: %s", block_uid, e)
+            return 0
+
+    def get_block_siblings(
+        self, block_uid: str, count: int = 1
+    ) -> dict[str, list[dict[str, Any]]]:
+        """Get sibling blocks before and after the specified block.
+
+        Args:
+            block_uid: UID of the block to find siblings for.
+            count: Number of siblings to get before and after.
+
+        Returns:
+            Dict with 'before' and 'after' lists of sibling blocks.
+            Each sibling has 'uid' and 'content' keys.
+        """
+        sanitized_uid = self._sanitize_query_input(block_uid)
+
+        # First get the parent and the block's order
+        parent_query = f"""[:find ?parent-uid ?block-order
+                           :where
+                           [?b :block/uid "{sanitized_uid}"]
+                           [?parent :block/children ?b]
+                           [?parent :block/uid ?parent-uid]
+                           [?b :block/order ?block-order]]"""
+
+        try:
+            parent_results = self.run_query(parent_query)
+            if not parent_results:
+                return {"before": [], "after": []}
+
+            parent_uid, block_order = parent_results[0]
+            sanitized_parent = self._sanitize_query_input(parent_uid)
+
+            # Get all siblings with their order
+            siblings_query = f"""[:find ?sib-uid ?sib-string ?sib-order
+                                 :where
+                                 [?parent :block/uid "{sanitized_parent}"]
+                                 [?parent :block/children ?sib]
+                                 [?sib :block/uid ?sib-uid]
+                                 [?sib :block/string ?sib-string]
+                                 [?sib :block/order ?sib-order]]"""
+
+            siblings_results = self.run_query(siblings_query)
+            if not siblings_results:
+                return {"before": [], "after": []}
+
+            # Sort by order
+            sorted_siblings = sorted(siblings_results, key=lambda x: x[2])
+
+            # Find position of current block and get neighbors
+            before = []
+            after = []
+            for i, sib in enumerate(sorted_siblings):
+                if sib[0] == block_uid:
+                    # Get siblings before
+                    start_idx = max(0, i - count)
+                    before = [
+                        {"uid": s[0], "content": s[1]}
+                        for s in sorted_siblings[start_idx:i]
+                    ]
+                    # Get siblings after
+                    end_idx = min(len(sorted_siblings), i + count + 1)
+                    after = [
+                        {"uid": s[0], "content": s[1]}
+                        for s in sorted_siblings[i + 1 : end_idx]
+                    ]
+                    break
+
+            return {"before": before, "after": after}
+
+        except RoamAPIError as e:
+            logger.warning("Error getting siblings for %s: %s", block_uid, e)
+            return {"before": [], "after": []}

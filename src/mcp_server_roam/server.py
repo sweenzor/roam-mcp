@@ -2,6 +2,7 @@
 
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta
 from typing import Any
@@ -91,6 +92,11 @@ class SemanticSearch(BaseModel):
     query: str
     limit: int = 10
     include_context: bool = True
+    include_children: bool = False
+    children_limit: int = 3
+    include_backlink_count: bool = False
+    include_siblings: bool = False
+    sibling_count: int = 1
 
 
 class GetBlockContext(BaseModel):
@@ -420,10 +426,48 @@ RECENCY_BOOST_DAYS = 30
 RECENCY_BOOST_MAX = 0.1
 
 
+def extract_references(content: str) -> dict[str, list[str]]:
+    """Extract tags and page references from block content.
+
+    Args:
+        content: Block content string.
+
+    Returns:
+        Dict with 'tags' (list of #hashtags) and 'page_refs' (list of [[Page]] refs).
+    """
+    # Extract #hashtags (word characters after #, not inside [[]])
+    tags = re.findall(r"(?<!\[\[)#([\w-]+)", content)
+
+    # Extract [[Page Name]] references
+    page_refs = re.findall(r"\[\[([^\]]+)\]\]", content)
+
+    return {"tags": list(set(tags)), "page_refs": list(set(page_refs))}
+
+
+def format_edit_time(edit_time_ms: int) -> str:
+    """Format edit timestamp as human-readable date.
+
+    Args:
+        edit_time_ms: Edit time in milliseconds since epoch.
+
+    Returns:
+        Formatted date string (e.g., "Dec 15, 2025").
+    """
+    if not edit_time_ms:
+        return "Unknown"
+    dt = datetime.fromtimestamp(edit_time_ms / 1000)
+    return dt.strftime("%b %d, %Y")
+
+
 def semantic_search(
     query: str,
     limit: int = 10,
     include_context: bool = True,
+    include_children: bool = False,
+    children_limit: int = 3,
+    include_backlink_count: bool = False,
+    include_siblings: bool = False,
+    sibling_count: int = 1,
 ) -> str:
     """Search for blocks using semantic similarity.
 
@@ -431,6 +475,11 @@ def semantic_search(
         query: Natural language search query.
         limit: Maximum number of results to return (default: 10).
         include_context: Include parent hierarchy context (default: True).
+        include_children: Include preview of child blocks (default: False).
+        children_limit: Max number of children to show (default: 3).
+        include_backlink_count: Show count of blocks referencing each result.
+        include_siblings: Include previous/next sibling blocks (default: False).
+        sibling_count: Number of siblings before/after to show (default: 1).
 
     Returns:
         Formatted search results with block content, page titles, and similarity.
@@ -529,12 +578,28 @@ def semantic_search(
         boosted_results.sort(key=lambda x: x["boosted_similarity"], reverse=True)
         final_results = boosted_results[:limit]
 
-        # Optionally fetch parent chain context
-        if include_context:
-            for result in final_results:
-                if not result.get("parent_chain"):
-                    parent_chain = roam.get_block_parent_chain(result["uid"])
-                    result["parent_chain"] = parent_chain if parent_chain else None
+        # Fetch additional context for each result
+        for result in final_results:
+            uid = result["uid"]
+
+            # Parent chain context
+            if include_context and not result.get("parent_chain"):
+                parent_chain = roam.get_block_parent_chain(uid)
+                result["parent_chain"] = parent_chain if parent_chain else None
+
+            # Children preview (Phase 1)
+            if include_children:
+                result["children"] = roam.get_block_children_preview(
+                    uid, children_limit
+                )
+
+            # Backlink count (Phase 4)
+            if include_backlink_count:
+                result["backlink_count"] = roam.get_block_reference_count(uid)
+
+            # Siblings context (Phase 5)
+            if include_siblings:
+                result["siblings"] = roam.get_block_siblings(uid, sibling_count)
 
         # Format output
         output_lines = [f"# Search Results for: {query}\n"]
@@ -544,18 +609,80 @@ def semantic_search(
             similarity = result["similarity"]
             page_title = result.get("page_title") or "Unknown"
             content = result["content"]
+            edit_time = result.get("edit_time", 0)
 
             output_lines.append(f"## {i}. [{similarity:.3f}] {page_title}")
 
+            # Path context
             if include_context and result.get("parent_chain"):
                 path = " > ".join(result["parent_chain"])
                 output_lines.append(f"**Path:** {path}")
 
-            # Truncate long content
-            if len(content) > 500:
-                content = content[:500] + "..."
-            output_lines.append(f"{content}")
-            output_lines.append(f"*UID: {result['uid']}*\n")
+            # Metadata line: Modified date and backlink count (Phases 3 & 4)
+            metadata_parts = []
+            metadata_parts.append(f"**Modified:** {format_edit_time(edit_time)}")
+            if include_backlink_count:
+                count = result.get("backlink_count", 0)
+                metadata_parts.append(f"**Referenced by:** {count} blocks")
+            output_lines.append(" | ".join(metadata_parts))
+
+            # Tags and page references (Phase 2)
+            refs = extract_references(content)
+            if refs["tags"]:
+                output_lines.append(
+                    f"**Tags:** {', '.join('#' + t for t in refs['tags'])}"
+                )
+            if refs["page_refs"]:
+                links = ", ".join("[[" + p + "]]" for p in refs["page_refs"])
+                output_lines.append(f"**Links:** {links}")
+
+            # Sibling context (Phase 5)
+            if include_siblings and result.get("siblings"):
+                siblings = result["siblings"]
+                if siblings["before"] or siblings["after"]:
+                    output_lines.append("\n**Context:**")
+                    for sib in siblings["before"]:
+                        sib_content = (
+                            sib["content"][:100] + "..."
+                            if len(sib["content"]) > 100
+                            else sib["content"]
+                        )
+                        output_lines.append(f"  ↑ {sib_content}")
+                    # Current block indicator
+                    display_content = (
+                        content[:100] + "..." if len(content) > 100 else content
+                    )
+                    output_lines.append(f"  → **{display_content}**")
+                    for sib in siblings["after"]:
+                        sib_content = (
+                            sib["content"][:100] + "..."
+                            if len(sib["content"]) > 100
+                            else sib["content"]
+                        )
+                        output_lines.append(f"  ↓ {sib_content}")
+                    output_lines.append("")
+
+            # Main content (if not already shown in siblings context)
+            if not (
+                include_siblings
+                and result.get("siblings")
+                and (result["siblings"]["before"] or result["siblings"]["after"])
+            ):
+                # Truncate long content
+                if len(content) > 500:
+                    content = content[:500] + "..."
+                output_lines.append(f"\n{content}")
+
+            # Children preview (Phase 1)
+            if include_children and result.get("children"):
+                output_lines.append("\n**Children:**")
+                for child in result["children"]:
+                    child_content = child["content"]
+                    if len(child_content) > 150:
+                        child_content = child_content[:150] + "..."
+                    output_lines.append(f"  - {child_content}")
+
+            output_lines.append(f"\n*UID: {result['uid']}*\n")
 
         elapsed = time.time() - search_start
         logger.info(
@@ -776,7 +903,13 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="semantic_search",
-            description="Search blocks using semantic similarity",
+            description=(
+                "Search blocks using semantic similarity. "
+                "Returns results with tags, page links, and edit dates. "
+                "Optional: include_children for nested content, "
+                "include_backlink_count for reference counts, "
+                "include_siblings for surrounding context."
+            ),
             inputSchema=SemanticSearch.model_json_schema(),
         ),
         Tool(
@@ -838,6 +971,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 arguments["query"],
                 arguments.get("limit", 10),
                 arguments.get("include_context", True),
+                arguments.get("include_children", False),
+                arguments.get("children_limit", 3),
+                arguments.get("include_backlink_count", False),
+                arguments.get("include_siblings", False),
+                arguments.get("sibling_count", 1),
             )
         case "get_block_context":
             result = get_block_context(arguments["uid"])

@@ -91,7 +91,7 @@ uv run mcp dev
 | `daily_context` | Get daily notes with backlinks for context |
 | `debug_daily_notes` | Debug daily note format detection |
 | `sync_index` | Build/update the vector index for semantic search |
-| `semantic_search` | Search blocks using vector similarity with recency boost |
+| `semantic_search` | Search blocks using vector similarity with enrichments (children, backlinks, siblings) |
 | `get_block_context` | Get a block with parent chain and children |
 | `search_by_text` | Keyword/substring search (non-semantic) |
 | `raw_query` | Execute arbitrary Datalog queries (power user tool) |
@@ -145,6 +145,20 @@ print(semantic_search('project management tools', limit=5))
 - **Parent Context**: Results include parent block chain for understanding hierarchy
 - **Similarity Threshold**: Filters out low-relevance results (default: 0.3)
 
+### Search Enrichments
+
+Optional enrichments provide additional context for each result:
+
+| Option | Default | Description |
+|--------|---------|-------------|
+| `include_children` | false | Show nested child blocks |
+| `children_limit` | 3 | Max children to display |
+| `include_backlink_count` | false | Show count of blocks referencing each result |
+| `include_siblings` | false | Show adjacent sibling blocks |
+| `sibling_count` | 1 | Number of siblings before/after |
+
+Results always include: modified timestamp, extracted tags (`#tag`), and page links (`[[page]]`).
+
 ### Performance
 
 - Initial sync: ~90,000 blocks indexed in ~6 minutes
@@ -161,6 +175,9 @@ uv run pytest
 # Run e2e tests (requires API credentials)
 ROAM_API_TOKEN=xxx ROAM_GRAPH_NAME=xxx uv run pytest tests/test_e2e.py -v
 
+# Run e2e search tests (requires API credentials)
+source .env && uv run pytest tests/test_e2e_search.py -v --no-cov
+
 # Format code
 uv run black src tests
 
@@ -170,6 +187,13 @@ uv run pyright
 # Lint
 uv run ruff check src tests
 ```
+
+### Pre-commit Checklist
+
+1. Format: `uv run black src tests`
+2. Lint: `uv run ruff check src tests`
+3. Type check: `uv run pyright src`
+4. Run tests: `uv run pytest`
 
 > **Note**: Roam API has a 50 requests/minute rate limit.
 

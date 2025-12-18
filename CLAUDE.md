@@ -22,11 +22,13 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - MCP install to Claude Desktop: `uv run mcp install`
 
 **Pre-commit checklist**: Before committing any changes:
-1. Run the formatter: `uv run black src tests`
+1. **Run the formatter first**: `uv run black src tests` (MUST run before committing!)
 2. Run the linter: `uv run ruff check src tests`
 3. Run the type checker: `uv run pyright src`
 4. Run the full test suite: `uv run pytest`
-5. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests: `uv run pytest tests/test_e2e.py -v`
+5. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests:
+   - `uv run pytest tests/test_e2e.py -v`
+   - `uv run pytest tests/test_e2e_search.py -v --no-cov`
 6. Fix any formatting, lint, type, or test failures before committing
 
 **Note**: Roam API has a 50 requests/minute rate limit. E2E tests are consolidated to stay under this limit.
@@ -55,6 +57,7 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
   - `test_embedding.py` - Unit tests for embedding service
   - `test_vector_store.py` - Unit tests for vector store
   - `test_e2e.py` - End-to-end tests (require API credentials)
+  - `test_e2e_search.py` - E2E tests for semantic search enrichments (require API credentials)
   - `test_client.py` - MCP client integration test
   - `test_mcp_tools.py` - MCP server tools integration test
 - `/reference/` - Reference implementations and documentation
@@ -133,7 +136,14 @@ Currently implemented tools:
 
 7. `semantic_search`: Search blocks using vector similarity
    - Input: query (string), limit (int, default: 10), include_context (bool, default: True)
-   - Output: Formatted search results with similarity scores and context
+   - Optional enrichments:
+     - `include_children` (bool, default: False): Show nested child blocks
+     - `children_limit` (int, default: 3): Max children to display
+     - `include_backlink_count` (bool, default: False): Show count of blocks referencing each result
+     - `include_siblings` (bool, default: False): Show adjacent sibling blocks for context
+     - `sibling_count` (int, default: 1): Number of siblings before/after to show
+   - Output: Formatted search results with similarity scores and enrichments
+   - Always shows: modified timestamp, extracted tags (#tag), page links ([[page]])
    - Performs incremental sync before each search to capture recent changes
    - Applies recency boost (linear decay over 30 days, max 0.1 boost)
    - Returns parent chain context for each result
@@ -320,10 +330,12 @@ Key constants that can be adjusted for different graph sizes:
 ## Testing
 - **Unit tests**: `test_server.py`, `test_server_unit.py` - run without API credentials
 - **E2E tests**: `test_e2e.py` - require ROAM_API_TOKEN and ROAM_GRAPH_NAME env vars
+- **E2E search tests**: `test_e2e_search.py` - test semantic search enrichments against real graph
 - E2E tests auto-skip when credentials not available
 - MCP Inspector for interactive testing: `uv run mcp dev`
 - **Coverage targets**: Maintain 100% code coverage
 - Use `pytest-cov` for coverage reporting
+- Run e2e search tests with: `source .env && uv run pytest tests/test_e2e_search.py -v --no-cov`
 
 ## Deployment
 - For development: `uv run mcp dev`
