@@ -188,12 +188,28 @@ uv run pyright
 uv run ruff check src tests
 ```
 
+### Pre-commit Hooks
+
+This project uses [pre-commit](https://pre-commit.com/) to automatically run code quality checks before each commit.
+
+```bash
+# Install hooks (one-time setup)
+uv run pre-commit install
+
+# Run hooks manually on all files
+uv run pre-commit run --all-files
+```
+
+The hooks automatically run:
+- **black** — Code formatting
+- **ruff** — Linting with auto-fix
+- **pyright** — Type checking
+
 ### Pre-commit Checklist
 
-1. Format: `uv run black src tests`
-2. Lint: `uv run ruff check src tests`
-3. Type check: `uv run pyright src`
-4. Run tests: `uv run pytest`
+1. Pre-commit hooks run automatically (black, ruff, pyright)
+2. Run tests: `uv run pytest`
+3. Run e2e tests if credentials are available
 
 > **Note**: Roam API has a 50 requests/minute rate limit.
 
