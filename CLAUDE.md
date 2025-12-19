@@ -21,15 +21,23 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - MCP development mode: `uv run mcp dev`
 - MCP install to Claude Desktop: `uv run mcp install`
 
+**Pre-commit hooks**: This project uses pre-commit hooks to automatically run formatting, linting, and type checking before each commit.
+- Install hooks (one-time setup): `uv run pre-commit install`
+- Run hooks manually: `uv run pre-commit run --all-files`
+- Skip hooks (not recommended): `git commit --no-verify`
+
+The hooks automatically run:
+1. **black** - Code formatting
+2. **ruff** - Linting (with auto-fix)
+3. **pyright** - Type checking
+
 **Pre-commit checklist**: Before committing any changes:
-1. **Run the formatter first**: `uv run black src tests` (MUST run before committing!)
-2. Run the linter: `uv run ruff check src tests`
-3. Run the type checker: `uv run pyright src`
-4. Run the full test suite: `uv run pytest`
-5. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests:
+1. Hooks run automatically (black, ruff, pyright)
+2. Run the full test suite: `uv run pytest`
+3. If `ROAM_API_TOKEN` and `ROAM_GRAPH_NAME` are available, also run e2e tests:
    - `uv run pytest tests/test_e2e.py -v`
    - `uv run pytest tests/test_e2e_search.py -v --no-cov`
-6. Fix any formatting, lint, type, or test failures before committing
+4. Fix any test failures before committing
 
 **Note**: Roam API has a 50 requests/minute rate limit. E2E tests are consolidated to stay under this limit.
 
@@ -69,6 +77,7 @@ This is an MCP (Model Context Protocol) server for Roam Research, allowing LLMs 
 - `/specs/` - Feature specifications
   - `semantic-search.md` - Semantic search feature spec
 - `pyproject.toml` - Project metadata, dependencies, and build settings
+- `.pre-commit-config.yaml` - Pre-commit hook configuration (black, ruff, pyright)
 - `.env` - Environment variables for Roam API token and graph name (not in git)
 
 ## MCP Server Implementation
