@@ -20,7 +20,6 @@ from mcp_server_roam.server import (
     call_tool,
     create_block,
     daily_context,
-    debug_daily_notes,
     extract_references,
     format_edit_time,
     get_backlinks,
@@ -513,79 +512,6 @@ class TestRoamContext:
 
         assert "Error fetching context:" in result
         assert "API Error" in result
-
-
-# Tests for debug_daily_notes
-class TestRoamDebugDailyNotes:
-    """Tests for debug_daily_notes function."""
-
-    def test_debug_daily_notes_success(self, mocker: MockerFixture) -> None:
-        """Test successful debug output."""
-        mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
-        mock_roam_instance.get_page.return_value = {
-            ":block/children": [{":block/string": "Test"}]
-        }
-        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
-
-        result = debug_daily_notes()
-
-        assert "Daily Notes Debug" in result
-        assert "Detected format" in result
-        assert "%B %d, %Y" in result
-
-    def test_debug_daily_notes_page_not_found(self, mocker: MockerFixture) -> None:
-        """Test when daily note page not found."""
-        mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
-        mock_roam_instance.get_page.side_effect = PageNotFoundError("Not found")
-        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
-
-        result = debug_daily_notes()
-
-        assert "Daily Notes Debug" in result
-        assert "Not found" in result
-
-    def test_debug_daily_notes_api_error_in_get_page(
-        self, mocker: MockerFixture
-    ) -> None:
-        """Test when get_page raises API error."""
-        mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
-        mock_roam_instance.get_page.side_effect = RoamAPIError("API Error")
-        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
-
-        result = debug_daily_notes()
-
-        assert "Daily Notes Debug" in result
-        assert "API Error" in result
-
-    def test_debug_daily_notes_api_error_in_format(self, mocker: MockerFixture) -> None:
-        """Test when find_daily_note_format raises API error."""
-        mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.find_daily_note_format.side_effect = RoamAPIError(
-            "API Error"
-        )
-        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
-
-        result = debug_daily_notes()
-
-        assert "Error:" in result
-        assert "API Error" in result
-
-    def test_debug_daily_notes_ordinal_format(self, mocker: MockerFixture) -> None:
-        """Test debug with ordinal date format."""
-        mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.find_daily_note_format.return_value = "%B %dth, %Y"
-        mock_roam_instance.get_page.return_value = {
-            ":block/children": [{":block/string": "Test"}]
-        }
-        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
-
-        result = debug_daily_notes()
-
-        assert "Daily Notes Debug" in result
-        assert "%B %dth, %Y" in result
 
 
 # Tests for sync_index
@@ -1217,19 +1143,6 @@ class TestCallTool:
         assert "Daily Notes" in result[0].text
 
     @pytest.mark.asyncio
-    async def test_call_tool_debug_daily_notes(self, mocker: MockerFixture) -> None:
-        """Test call_tool handles debug_daily_notes."""
-        mock_roam_instance = mocker.MagicMock()
-        mock_roam_instance.find_daily_note_format.return_value = "%B %d, %Y"
-        mock_roam_instance.get_page.return_value = {":block/children": []}
-        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
-
-        result = await call_tool("debug_daily_notes", {})
-
-        assert len(result) == 1
-        assert "Daily Notes Debug" in result[0].text
-
-    @pytest.mark.asyncio
     async def test_call_tool_sync_index(self, mocker: MockerFixture) -> None:
         """Test call_tool handles sync_index."""
         mock_sync = mocker.patch(
@@ -1442,14 +1355,13 @@ class TestListTools:
         assert "get_page" in tool_names
         assert "create_block" in tool_names
         assert "daily_context" in tool_names
-        assert "debug_daily_notes" in tool_names
         assert "sync_index" in tool_names
         assert "semantic_search" in tool_names
         assert "get_block_context" in tool_names
         assert "search_by_text" in tool_names
         assert "raw_query" in tool_names
         assert "get_backlinks" in tool_names
-        assert len(tools) == 11
+        assert len(tools) == 10
 
 
 # Tests for serve function

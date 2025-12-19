@@ -13,7 +13,6 @@ Note: Roam API has a 50 req/min rate limit. Tests are consolidated.
 """
 
 import os
-import re
 from collections.abc import Awaitable, Callable
 from typing import Any
 
@@ -61,7 +60,6 @@ class TestE2E:
                 "get_page",
                 "create_block",
                 "daily_context",
-                "debug_daily_notes",
                 "sync_index",
                 "semantic_search",
                 "get_block_context",
@@ -90,31 +88,13 @@ class TestE2E:
         await run_with_session(test)
 
     async def test_daily_notes_and_context(self) -> None:
-        """Test daily note detection and context retrieval."""
+        """Test daily context retrieval."""
 
         async def test(session: ClientSession) -> None:
-            # Test debug_daily_notes (detects format)
-            debug_result = await session.call_tool("debug_daily_notes", {})
-            debug_text = debug_result.content[0].text
-            assert "Daily Notes Debug" in debug_text
-            assert "Detected format" in debug_text
-
-            # Test daily_context (uses cached format, fetches 1 day only)
+            # Test daily_context (fetches 1 day only)
             context_result = await session.call_tool(
                 "daily_context", {"days": 1, "max_references": 3}
             )
             assert "Daily Notes Context" in context_result.content[0].text
-
-            # If a daily note was found, try to fetch it
-            for line in debug_text.split("\n"):
-                if line.startswith("✅"):
-                    match = re.search(r"\*\*(.+?)\*\*", line)
-                    if match:
-                        date_str = match.group(1)
-                        result = await session.call_tool(
-                            "get_page", {"title": date_str}
-                        )
-                        assert date_str in result.content[0].text
-                        return
 
         await run_with_session(test)
