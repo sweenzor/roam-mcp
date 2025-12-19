@@ -129,19 +129,14 @@ Currently implemented tools:
    - Auto-detects daily note formats (June 13th, 2025 vs 06-13-2025 etc.)
    - Memory optimized with configurable limits
 
-5. `debug_daily_notes`: Debug tool for daily note format detection
-   - Input: none
-   - Output: Shows detected daily note format and tests recent daily notes
-   - Useful for troubleshooting date format issues
-
-6. `sync_index`: Build or update the vector index for semantic search
+5. `sync_index`: Build or update the vector index for semantic search
    - Input: full (bool, default: False) - if True, rebuilds entire index
    - Output: Status message with sync statistics
    - Stores embeddings in `~/.roam-mcp/{graph_name}_vectors.db`
    - Uses all-MiniLM-L6-v2 model (384 dimensions)
    - Supports incremental updates (only new/modified blocks)
 
-7. `semantic_search`: Search blocks using vector similarity
+6. `semantic_search`: Search blocks using vector similarity
    - Input: query (string), limit (int, default: 10), include_context (bool, default: True)
    - Optional enrichments:
      - `include_children` (bool, default: False): Show nested child blocks
@@ -156,21 +151,21 @@ Currently implemented tools:
    - Returns parent chain context for each result
    - Minimum similarity threshold of 0.3
 
-8. `get_block_context`: Get a block with its surrounding context
+7. `get_block_context`: Get a block with its surrounding context
    - Input: uid (block UID)
    - Output: Block content with page title, parent chain, and nested children
 
-9. `search_by_text`: Keyword/substring search (non-semantic)
+8. `search_by_text`: Keyword/substring search (non-semantic)
    - Input: text (search string), page_title (optional), limit (default: 20)
    - Output: Matching blocks with UID, content, and page title
    - Case-sensitive substring matching using Datalog
 
-10. `raw_query`: Execute arbitrary Datalog queries (power user tool)
-    - Input: query (Datalog query string), args (optional list)
-    - Output: Raw JSON results
-    - Use with caution - allows direct database access
+9. `raw_query`: Execute arbitrary Datalog queries (power user tool)
+   - Input: query (Datalog query string), args (optional list)
+   - Output: Raw JSON results
+   - Use with caution - allows direct database access
 
-11. `get_backlinks`: Get all blocks that reference a page
+10. `get_backlinks`: Get all blocks that reference a page
     - Input: page_title, limit (default: 20)
     - Output: List of blocks with UID, content, and source page title
 

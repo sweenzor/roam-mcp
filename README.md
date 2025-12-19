@@ -89,7 +89,6 @@ uv run mcp dev
 | `get_page` | Retrieve page content as markdown (unlimited nesting) |
 | `create_block` | Create a new block in a Roam page |
 | `daily_context` | Get daily notes with backlinks for context |
-| `debug_daily_notes` | Debug daily note format detection |
 | `sync_index` | Build/update the vector index for semantic search |
 | `semantic_search` | Search blocks using vector similarity with enrichments (children, backlinks, siblings) |
 | `get_block_context` | Get a block with parent chain and children |

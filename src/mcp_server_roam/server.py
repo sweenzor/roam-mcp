@@ -74,12 +74,6 @@ class DailyContext(BaseModel):
     max_references: int = 10
 
 
-class DebugDailyNotes(BaseModel):
-    """Input schema for debug_daily_notes tool."""
-
-    pass
-
-
 class SyncIndex(BaseModel):
     """Input schema for sync_index tool."""
 
@@ -242,46 +236,6 @@ def daily_context(days: int = 10, max_references: int = 10) -> str:
         return roam.get_daily_notes_context(days, max_references)
     except RoamAPIError as e:
         return f"Error fetching context: {str(e)}"
-
-
-def debug_daily_notes() -> str:
-    """Debug function to test different daily note formats and show what exists.
-
-    Returns:
-        Debug information about daily note formats and existing pages.
-    """
-    try:
-        # Get singleton Roam API client
-        roam = get_roam_client()
-
-        # Get the detected format
-        detected_format = roam.find_daily_note_format()
-
-        debug_info = ["# Daily Notes Debug\n"]
-        debug_info.append(f"**Detected format**: `{detected_format}`\n")
-
-        # Test the last 3 days with the detected format
-        for i in range(3):
-            date = datetime.now() - timedelta(days=i)
-
-            if detected_format in ORDINAL_DATE_FORMATS:
-                date_str = date.strftime(f"%B %d{ordinal_suffix(date.day)}, %Y")
-            else:
-                date_str = date.strftime(detected_format)
-
-            try:
-                # Try to get the page
-                page_data = roam.get_page(date_str)
-                children_count = len(page_data.get(":block/children", []))
-                debug_info.append(f"✅ **{date_str}**: Found ({children_count})")
-            except PageNotFoundError:
-                debug_info.append(f"❌ **{date_str}**: Not found")
-            except RoamAPIError as e:
-                debug_info.append(f"❌ **{date_str}**: Error - {str(e)}")
-
-        return "\n".join(debug_info)
-    except RoamAPIError as e:
-        return f"Error: {str(e)}"
 
 
 # Constants for sync_index
@@ -892,11 +846,6 @@ async def list_tools() -> list[Tool]:
             inputSchema=DailyContext.model_json_schema(),
         ),
         Tool(
-            name="debug_daily_notes",
-            description="Debug daily note formats and show what daily notes exist",
-            inputSchema=DebugDailyNotes.model_json_schema(),
-        ),
-        Tool(
             name="sync_index",
             description="Build or update the vector index for semantic search",
             inputSchema=SyncIndex.model_json_schema(),
@@ -962,8 +911,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
             result = daily_context(
                 arguments.get("days", 10), arguments.get("max_references", 10)
             )
-        case "debug_daily_notes":
-            result = debug_daily_notes()
         case "sync_index":
             result = sync_index(arguments.get("full", False))
         case "semantic_search":
