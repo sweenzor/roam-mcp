@@ -55,6 +55,8 @@ class GetPage(BaseModel):
     """Input schema for get_page_markdown tool."""
 
     title: str
+    include_backlinks: bool = True
+    max_backlinks: int = 10
 
 
 class CreateBlock(BaseModel):
@@ -132,7 +134,9 @@ def hello_world(name: str = "World") -> str:
     return f"Hello, {name}! This is the Roam Research MCP server."
 
 
-def get_page(title: str) -> str:
+def get_page(
+    title: str, include_backlinks: bool = True, max_backlinks: int = 10
+) -> str:
     """Retrieve a page's content in clean markdown format.
 
     This uses the Roam API to fetch the page content and converts it to a well-formatted
@@ -140,6 +144,9 @@ def get_page(title: str) -> str:
 
     Args:
         title: Title of the page to fetch
+        include_backlinks: If True, append backlinks section showing blocks that
+            reference this page
+        max_backlinks: Maximum number of backlinks to include (default: 10)
 
     Returns:
         Markdown-formatted page content with proper nesting and references
@@ -157,6 +164,18 @@ def get_page(title: str) -> str:
         # Process children blocks recursively using unified function from roam_api
         if ":block/children" in page_data and page_data[":block/children"]:
             markdown += roam.process_blocks(page_data[":block/children"], 0)
+
+        # Add backlinks section if requested
+        if include_backlinks:
+            backlinks = roam.get_references_to_page(title, max_backlinks)
+            if backlinks:
+                markdown += "\n---\n\n## Backlinks\n\n"
+                for ref in backlinks:
+                    content = ref.get("string", "")
+                    if len(content) > 200:
+                        content = content[:200] + "..."
+                    markdown += f"- {content}\n"
+                    markdown += f"  *UID: {ref['uid']}*\n"
 
         return markdown
     except PageNotFoundError as e:
@@ -830,7 +849,10 @@ async def list_tools() -> list[Tool]:
         ),
         Tool(
             name="get_page",
-            description="Retrieve a page's content in clean markdown format",
+            description=(
+                "Retrieve a page's content in clean markdown format. "
+                "Optionally include backlinks (blocks that reference this page)."
+            ),
             inputSchema=GetPage.model_json_schema(),
         ),
         Tool(
@@ -900,7 +922,11 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         case "hello_world":
             result = hello_world(arguments.get("name", "World"))
         case "get_page":
-            result = get_page(arguments["title"])
+            result = get_page(
+                arguments["title"],
+                arguments.get("include_backlinks", True),
+                arguments.get("max_backlinks", 10),
+            )
         case "create_block":
             result = create_block(
                 arguments["content"], arguments.get("page_uid"), arguments.get("title")

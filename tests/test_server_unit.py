@@ -182,6 +182,7 @@ class TestRoamGetPageMarkdown:
         mock_roam_instance = mocker.MagicMock()
         mock_roam_instance.get_page.return_value = mock_page_data_empty
         mock_roam_instance.process_blocks.return_value = ""
+        mock_roam_instance.get_references_to_page.return_value = []
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
@@ -196,6 +197,7 @@ class TestRoamGetPageMarkdown:
             ":node/title": "No Children Key",
             ":block/uid": "no-children-uid",
         }
+        mock_roam_instance.get_references_to_page.return_value = []
 
         mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
 
@@ -366,6 +368,100 @@ class TestRoamGetPageMarkdownIntegration:
         assert "    - Level 3\n" in result
         assert "      - Level 4\n" in result
         assert "        - Level 5\n" in result
+
+    def test_get_page_with_backlinks(self, mocker: MockerFixture) -> None:
+        """Test getting page with include_backlinks=True."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_page.return_value = {
+            ":node/title": "Test Page",
+            ":block/uid": "test-uid",
+            ":block/children": [
+                {":block/string": "Page content", ":block/uid": "content-uid"}
+            ],
+        }
+        mock_roam_instance.process_blocks.return_value = "- Page content\n"
+        mock_roam_instance.get_references_to_page.return_value = [
+            {"uid": "ref-1", "string": "This links to [[Test Page]]"},
+            {"uid": "ref-2", "string": "Another reference to [[Test Page]] here"},
+        ]
+
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = get_page("Test Page", include_backlinks=True, max_backlinks=10)
+
+        assert "# Test Page\n\n" in result
+        assert "- Page content\n" in result
+        assert "## Backlinks" in result
+        assert "This links to [[Test Page]]" in result
+        assert "Another reference to [[Test Page]] here" in result
+        assert "*UID: ref-1*" in result
+        assert "*UID: ref-2*" in result
+        mock_roam_instance.get_references_to_page.assert_called_once_with(
+            "Test Page", 10
+        )
+
+    def test_get_page_with_backlinks_none_found(self, mocker: MockerFixture) -> None:
+        """Test getting page with include_backlinks=True but no backlinks exist."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_page.return_value = {
+            ":node/title": "Isolated Page",
+            ":block/uid": "isolated-uid",
+            ":block/children": [],
+        }
+        mock_roam_instance.process_blocks.return_value = ""
+        mock_roam_instance.get_references_to_page.return_value = []
+
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = get_page("Isolated Page", include_backlinks=True)
+
+        assert "# Isolated Page\n\n" in result
+        assert "## Backlinks" not in result
+
+    def test_get_page_with_backlinks_truncates_long_content(
+        self, mocker: MockerFixture
+    ) -> None:
+        """Test that long backlink content is truncated."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_page.return_value = {
+            ":node/title": "Test Page",
+            ":block/uid": "test-uid",
+            ":block/children": [],
+        }
+        mock_roam_instance.process_blocks.return_value = ""
+        long_content = "A" * 300  # 300 chars, should be truncated to 200
+        mock_roam_instance.get_references_to_page.return_value = [
+            {"uid": "long-ref", "string": long_content},
+        ]
+
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = get_page("Test Page", include_backlinks=True)
+
+        assert "## Backlinks" in result
+        assert "A" * 200 + "..." in result
+        assert "A" * 201 not in result
+
+    def test_get_page_without_backlinks(self, mocker: MockerFixture) -> None:
+        """Test getting page with include_backlinks=False skips backlink fetch."""
+        mock_roam_instance = mocker.MagicMock()
+        mock_roam_instance.get_page.return_value = {
+            ":node/title": "Test Page",
+            ":block/uid": "test-uid",
+            ":block/children": [
+                {":block/string": "Page content", ":block/uid": "content-uid"}
+            ],
+        }
+        mock_roam_instance.process_blocks.return_value = "- Page content\n"
+
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam_instance)
+
+        result = get_page("Test Page", include_backlinks=False)
+
+        assert "# Test Page\n\n" in result
+        assert "- Page content\n" in result
+        assert "## Backlinks" not in result
+        mock_roam_instance.get_references_to_page.assert_not_called()
 
 
 # Tests for get_roam_client singleton
