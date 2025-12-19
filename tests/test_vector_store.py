@@ -349,57 +349,6 @@ class TestSearch:
         assert results[0]["uid"] == "block-1"
 
 
-class TestBlocksNeedingEmbedding:
-    """Tests for get_blocks_needing_embedding."""
-
-    def test_empty_store(self, vector_store: VectorStore) -> None:
-        """Test returns empty list for empty store."""
-        blocks = vector_store.get_blocks_needing_embedding()
-        assert blocks == []
-
-    def test_returns_unembedded_blocks(self, vector_store: VectorStore) -> None:
-        """Test returns blocks without embeddings."""
-        vector_store.upsert_blocks(
-            [
-                {"uid": "block-1", "content": "Content 1"},
-                {"uid": "block-2", "content": "Content 2"},
-            ]
-        )
-
-        blocks = vector_store.get_blocks_needing_embedding()
-
-        assert len(blocks) == 2
-        uids = {b["uid"] for b in blocks}
-        assert uids == {"block-1", "block-2"}
-
-    def test_excludes_embedded_blocks(self, vector_store: VectorStore) -> None:
-        """Test excludes blocks that already have embeddings."""
-        vector_store.upsert_blocks(
-            [
-                {"uid": "block-1", "content": "Content 1"},
-                {"uid": "block-2", "content": "Content 2"},
-            ]
-        )
-
-        # Embed block-1
-        embedding = np.array([[0.1] * EMBEDDING_DIMENSIONS], dtype=np.float32)
-        vector_store.upsert_embeddings(["block-1"], embedding)
-
-        blocks = vector_store.get_blocks_needing_embedding()
-
-        assert len(blocks) == 1
-        assert blocks[0]["uid"] == "block-2"
-
-    def test_respects_limit(self, vector_store: VectorStore) -> None:
-        """Test respects limit parameter."""
-        blocks = [{"uid": f"block-{i}", "content": f"Content {i}"} for i in range(10)]
-        vector_store.upsert_blocks(blocks)
-
-        result = vector_store.get_blocks_needing_embedding(limit=5)
-
-        assert len(result) == 5
-
-
 class TestDropAllData:
     """Tests for drop_all_data."""
 

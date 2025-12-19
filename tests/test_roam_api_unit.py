@@ -820,7 +820,8 @@ class TestFindDailyNoteFormat:
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
         result = api.find_daily_note_format()
 
-        assert result == "%B %dth, %Y"
+        # Now returns "ordinal" marker instead of fake strftime pattern
+        assert result == "ordinal"
 
     @patch("mcp_server_roam.roam_api.requests.post")
     def test_find_format_no_match(self, mock_post: MagicMock) -> None:
@@ -971,7 +972,7 @@ class TestGetDailyNotesContext:
         """Test getting context with ordinal date format."""
         # Set cached format to ordinal
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
-        api._daily_note_format = "%B %dth, %Y"
+        api._daily_note_format = "ordinal"
 
         # Mock page not found for simpler test
         page_response = MagicMock()
@@ -1228,8 +1229,8 @@ class TestExceptionClasses:
 class TestBulkFetchMethods:
     """Tests for bulk fetch methods used by sync_index."""
 
-    def test_get_all_blocks_for_sync_success(self) -> None:
-        """Test fetching all blocks for sync."""
+    def test_get_blocks_for_sync_all(self) -> None:
+        """Test fetching all blocks for sync (no timestamp)."""
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
 
         mock_results = [
@@ -1238,7 +1239,7 @@ class TestBulkFetchMethods:
         ]
 
         with patch.object(api, "run_query", return_value=mock_results) as mock_query:
-            blocks = api.get_all_blocks_for_sync()
+            blocks = api.get_blocks_for_sync()
 
             assert len(blocks) == 2
             assert blocks[0] == {
@@ -1251,15 +1252,15 @@ class TestBulkFetchMethods:
             assert blocks[1]["uid"] == "uid2"
             mock_query.assert_called_once()
 
-    def test_get_all_blocks_for_sync_empty(self) -> None:
+    def test_get_blocks_for_sync_empty(self) -> None:
         """Test fetching all blocks when none exist."""
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
 
         with patch.object(api, "run_query", return_value=[]):
-            blocks = api.get_all_blocks_for_sync()
+            blocks = api.get_blocks_for_sync()
             assert blocks == []
 
-    def test_get_blocks_modified_since_success(self) -> None:
+    def test_get_blocks_for_sync_since_timestamp(self) -> None:
         """Test fetching blocks modified since a timestamp."""
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
 
@@ -1268,7 +1269,7 @@ class TestBulkFetchMethods:
         ]
 
         with patch.object(api, "run_query", return_value=mock_results) as mock_query:
-            blocks = api.get_blocks_modified_since(1500)
+            blocks = api.get_blocks_for_sync(since_timestamp=1500)
 
             assert len(blocks) == 1
             assert blocks[0]["uid"] == "uid1"
@@ -1276,12 +1277,12 @@ class TestBulkFetchMethods:
             query_arg = mock_query.call_args[0][0]
             assert "1500" in query_arg
 
-    def test_get_blocks_modified_since_empty(self) -> None:
+    def test_get_blocks_for_sync_since_timestamp_empty(self) -> None:
         """Test fetching modified blocks when none exist."""
         api = RoamAPI(api_token="test-token", graph_name="test-graph")
 
         with patch.object(api, "run_query", return_value=[]):
-            blocks = api.get_blocks_modified_since(1500)
+            blocks = api.get_blocks_for_sync(since_timestamp=1500)
             assert blocks == []
 
     def test_get_block_parent_chain_success(self) -> None:

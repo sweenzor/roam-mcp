@@ -43,27 +43,15 @@ async def test_server() -> None:
             for tool in tools_result.tools:
                 print(f"- {tool.name}: {tool.description}")
 
-            # Test hello world tool
-            print("\nTesting roam_hello_world tool...")
-            try:
-                hello_result = await session.call_tool(
-                    "roam_hello_world", {"name": "MCP Tester"}
-                )
-                print(f"Result: {hello_result}")
-            except Exception as e:
-                print(f"Error calling roam_hello_world: {e}")
-
-            # Test get_page_markdown tool
-            print("\nTesting roam_get_page_markdown tool...")
+            # Test get_page tool
+            print("\nTesting get_page tool...")
             page_title = "April 6th, 2025"
             try:
-                page_result = await session.call_tool(
-                    "roam_get_page_markdown", {"title": page_title}
-                )
+                page_result = await session.call_tool("get_page", {"title": page_title})
                 print(f"Result for '{page_title}':")
                 print(page_result)
             except Exception as e:
-                print(f"Error calling roam_get_page_markdown: {e}")
+                print(f"Error calling get_page: {e}")
 
     except Exception as e:
         print(f"Error: {e}")

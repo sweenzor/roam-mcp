@@ -5,9 +5,14 @@ import logging
 import re
 import time
 from datetime import datetime
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 from dotenv import load_dotenv
+
+if TYPE_CHECKING:
+    from mcp_server_roam.embedding import EmbeddingService
+    from mcp_server_roam.vector_store import VectorStore
+
 from mcp.server import Server
 from mcp.server.stdio import stdio_server
 from mcp.types import TextContent, Tool
@@ -45,12 +50,6 @@ def get_roam_client() -> RoamAPI:
 
 
 # Pydantic models for tool inputs
-class HelloWorld(BaseModel):
-    """Input schema for hello_world tool."""
-
-    name: str = "World"
-
-
 class GetPage(BaseModel):
     """Input schema for get_page_markdown tool."""
 
@@ -122,18 +121,6 @@ class GetBacklinks(BaseModel):
 
 
 # Tool implementation functions
-def hello_world(name: str = "World") -> str:
-    """Simple hello world tool for Roam Research MCP.
-
-    Args:
-        name: The name to greet.
-
-    Returns:
-        A greeting message.
-    """
-    return f"Hello, {name}! This is the Roam Research MCP server."
-
-
 def get_page(
     title: str, include_backlinks: bool = True, max_backlinks: int = 10
 ) -> str:
@@ -287,7 +274,7 @@ def sync_index(full: bool = False) -> str:
             store.drop_all_data()
             store.set_sync_status(SyncStatus.IN_PROGRESS)
             fetch_start = time.time()
-            blocks = roam.get_all_blocks_for_sync()
+            blocks = roam.get_blocks_for_sync()
             logger.info(
                 "Fetched %d blocks from Roam API in %.1fs",
                 len(blocks),
@@ -301,7 +288,7 @@ def sync_index(full: bool = False) -> str:
                 logger.info("No previous sync found - performing full sync")
                 store.set_sync_status(SyncStatus.IN_PROGRESS)
                 fetch_start = time.time()
-                blocks = roam.get_all_blocks_for_sync()
+                blocks = roam.get_blocks_for_sync()
                 logger.info(
                     "Fetched %d blocks from Roam API in %.1fs",
                     len(blocks),
@@ -310,7 +297,7 @@ def sync_index(full: bool = False) -> str:
             else:
                 store.set_sync_status(SyncStatus.IN_PROGRESS)
                 logger.debug("Incremental sync from timestamp %d", last_timestamp)
-                blocks = roam.get_blocks_modified_since(last_timestamp)
+                blocks = roam.get_blocks_for_sync(since_timestamp=last_timestamp)
                 logger.info(
                     "Found %d modified blocks for incremental sync", len(blocks)
                 )
@@ -364,8 +351,9 @@ def sync_index(full: bool = False) -> str:
                 )
 
         # Update sync timestamp to the latest edit_time
-        max_edit_time = max(b["edit_time"] for b in blocks if b.get("edit_time"))
-        store.set_last_sync_timestamp(max_edit_time)
+        edit_times = [b["edit_time"] for b in blocks if b.get("edit_time")]
+        if edit_times:
+            store.set_last_sync_timestamp(max(edit_times))
         store.set_sync_status(SyncStatus.COMPLETED)
 
         embed_elapsed = time.time() - embed_start
@@ -395,6 +383,73 @@ def sync_index(full: bool = False) -> str:
 SEARCH_MIN_SIMILARITY = 0.3
 RECENCY_BOOST_DAYS = 30
 RECENCY_BOOST_MAX = 0.1
+
+
+def _incremental_sync(
+    roam: RoamAPI,
+    store: "VectorStore",
+    embedding_service: "EmbeddingService",
+) -> int:
+    """Perform incremental sync of modified blocks.
+
+    Args:
+        roam: RoamAPI client instance.
+        store: VectorStore instance.
+        embedding_service: EmbeddingService instance.
+
+    Returns:
+        Number of blocks synced.
+    """
+    last_timestamp = store.get_last_sync_timestamp()
+    if last_timestamp is None:
+        return 0
+
+    modified_blocks = roam.get_blocks_for_sync(since_timestamp=last_timestamp)
+    if not modified_blocks:
+        return 0
+
+    logger.info("Incremental sync: updating %d modified blocks", len(modified_blocks))
+
+    # Store block metadata
+    store.upsert_blocks(modified_blocks)
+
+    # Generate and store embeddings
+    texts = []
+    uids = []
+    for block in modified_blocks:
+        formatted_text = embedding_service.format_block_for_embedding(
+            content=block["content"],
+            page_title=block.get("page_title"),
+            parent_chain=None,
+        )
+        texts.append(formatted_text)
+        uids.append(block["uid"])
+
+    embeddings = embedding_service.embed_texts(texts)
+    store.upsert_embeddings(uids, embeddings)
+
+    # Update sync timestamp
+    edit_times = [b["edit_time"] for b in modified_blocks if b.get("edit_time")]
+    if edit_times:
+        store.set_last_sync_timestamp(max(edit_times))
+
+    return len(modified_blocks)
+
+
+def calculate_recency_boost(edit_time_ms: int, now_ms: int) -> float:
+    """Calculate recency boost for search results.
+
+    Args:
+        edit_time_ms: Edit time in milliseconds since epoch.
+        now_ms: Current time in milliseconds since epoch.
+
+    Returns:
+        Boost value between 0 and RECENCY_BOOST_MAX.
+    """
+    age_days = (now_ms - edit_time_ms) / (1000 * 60 * 60 * 24)
+    if age_days < RECENCY_BOOST_DAYS:
+        return RECENCY_BOOST_MAX * (1 - age_days / RECENCY_BOOST_DAYS)
+    return 0.0
 
 
 def extract_references(content: str) -> dict[str, list[str]]:
@@ -471,36 +526,7 @@ def semantic_search(
             )
 
         # Perform incremental sync before search
-        last_timestamp = store.get_last_sync_timestamp()
-        if last_timestamp is not None:
-            modified_blocks = roam.get_blocks_modified_since(last_timestamp)
-            if modified_blocks:
-                logger.info(
-                    "Pre-search sync: updating %d modified blocks", len(modified_blocks)
-                )
-                # Sync the modified blocks
-                store.upsert_blocks(modified_blocks)
-
-                # Generate and store embeddings
-                texts = []
-                uids = []
-                for block in modified_blocks:
-                    formatted_text = embedding_service.format_block_for_embedding(
-                        content=block["content"],
-                        page_title=block.get("page_title"),
-                        parent_chain=None,
-                    )
-                    texts.append(formatted_text)
-                    uids.append(block["uid"])
-
-                embeddings = embedding_service.embed_texts(texts)
-                store.upsert_embeddings(uids, embeddings)
-
-                # Update sync timestamp
-                max_edit_time = max(
-                    b["edit_time"] for b in modified_blocks if b.get("edit_time")
-                )
-                store.set_last_sync_timestamp(max_edit_time)
+        _incremental_sync(roam, store, embedding_service)
 
         # Embed the query
         query_embedding = embedding_service.embed_single(query)
@@ -520,22 +546,8 @@ def semantic_search(
         now_ms = int(time.time() * 1000)
         boosted_results = []
         for result in raw_results:
-            # Get edit time from the blocks table
-            cursor = store.conn.execute(
-                "SELECT edit_time FROM blocks WHERE uid = ?",
-                (result["uid"],),
-            )
-            row = cursor.fetchone()
-            edit_time = row["edit_time"] if row and row["edit_time"] else 0
-
-            # Calculate recency boost (linear decay over RECENCY_BOOST_DAYS)
-            age_days = (now_ms - edit_time) / (1000 * 60 * 60 * 24)
-            if age_days < RECENCY_BOOST_DAYS:
-                recency_factor = 1 - (age_days / RECENCY_BOOST_DAYS)
-                boost = RECENCY_BOOST_MAX * recency_factor
-            else:
-                boost = 0
-
+            edit_time = result.get("edit_time", 0)
+            boost = calculate_recency_boost(edit_time, now_ms)
             boosted_similarity = result["similarity"] + boost
             boosted_results.append(
                 {
@@ -843,11 +855,6 @@ async def list_tools() -> list[Tool]:
     """
     return [
         Tool(
-            name="hello_world",
-            description="Simple hello world greeting from Roam MCP server",
-            inputSchema=HelloWorld.model_json_schema(),
-        ),
-        Tool(
             name="get_page",
             description=(
                 "Retrieve a page's content in clean markdown format. "
@@ -919,8 +926,6 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
         ValueError: If the tool name is unknown.
     """
     match name:
-        case "hello_world":
-            result = hello_world(arguments.get("name", "World"))
         case "get_page":
             result = get_page(
                 arguments["title"],

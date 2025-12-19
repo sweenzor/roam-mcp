@@ -48,15 +48,14 @@ async def run_with_session(test_fn: Callable[[ClientSession], Awaitable[Any]]) -
 class TestE2E:
     """E2E tests consolidated to minimize API calls (50 req/min limit)."""
 
-    async def test_server_tools_and_hello(self) -> None:
-        """Test server lists tools and hello_world works."""
+    async def test_server_tools(self) -> None:
+        """Test server lists all expected tools."""
 
         async def test(session: ClientSession) -> None:
             # Check tools are registered
             tools = await session.list_tools()
             tool_names = {t.name for t in tools.tools}
             expected = {
-                "hello_world",
                 "get_page",
                 "create_block",
                 "daily_context",
@@ -68,10 +67,6 @@ class TestE2E:
                 "get_backlinks",
             }
             assert expected == tool_names
-
-            # Test hello_world
-            result = await session.call_tool("hello_world", {"name": "E2E"})
-            assert "Hello, E2E!" in result.content[0].text
 
         await run_with_session(test)
 
@@ -87,11 +82,11 @@ class TestE2E:
 
         await run_with_session(test)
 
-    async def test_daily_notes_and_context(self) -> None:
-        """Test daily context retrieval."""
+    async def test_daily_notes_context(self) -> None:
+        """Test daily note context retrieval."""
 
         async def test(session: ClientSession) -> None:
-            # Test daily_context (fetches 1 day only)
+            # Test daily_context (fetches 1 day only to minimize API calls)
             context_result = await session.call_tool(
                 "daily_context", {"days": 1, "max_references": 3}
             )

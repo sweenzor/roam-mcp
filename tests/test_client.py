@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Simple test client for the Roam MCP server.
 
-This script sends a request to test the roam_hello_world tool.
+This script demonstrates connecting to the server and calling tools.
 """
 import asyncio
 import os
@@ -37,34 +37,24 @@ async def run_client_demo() -> None:
             tools_result = await session.list_tools()
             print(f"Tools result: {tools_result}")
 
-            # Call the hello_world tool
-            print("\nTesting roam_hello_world tool:")
+            # Call the get_page tool
+            print("\nTesting get_page tool:")
             try:
-                result = await session.call_tool("roam_hello_world", {"name": "Tester"})
+                result = await session.call_tool("get_page", {"title": "Test Page"})
                 print(f"Response: {result}")
             except Exception as e:
-                print(f"Error calling roam_hello_world: {e}")
-
-            # Call the fetch_page_by_title tool
-            print("\nTesting roam_fetch_page_by_title tool:")
-            try:
-                result = await session.call_tool(
-                    "roam_fetch_page_by_title", {"title": "Test Page"}
-                )
-                print(f"Response: {result}")
-            except Exception as e:
-                print(f"Error calling roam_fetch_page_by_title: {e}")
+                print(f"Error calling get_page: {e}")
 
             # Call the create_block tool
-            print("\nTesting roam_create_block tool:")
+            print("\nTesting create_block tool:")
             try:
                 result = await session.call_tool(
-                    "roam_create_block",
+                    "create_block",
                     {"content": "This is a test block", "title": "Test Page"},
                 )
                 print(f"Response: {result}")
             except Exception as e:
-                print(f"Error calling roam_create_block: {e}")
+                print(f"Error calling create_block: {e}")
 
     except Exception as e:
         print(f"Error: {e}")
