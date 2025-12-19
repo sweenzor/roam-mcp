@@ -74,8 +74,6 @@ The hooks automatically run:
   - `roam-python-sdk/` - Roam Python SDK (API client reference)
   - `readme-mcp-python-sdk.md` - MCP Python SDK documentation
   - `roam-research-general-info.md` - Roam Research background info
-- `/specs/` - Feature specifications
-  - `semantic-search.md` - Semantic search feature spec
 - `pyproject.toml` - Project metadata, dependencies, and build settings
 - `.pre-commit-config.yaml` - Pre-commit hook configuration (black, ruff, pyright)
 - `.env` - Environment variables for Roam API token and graph name (not in git)
