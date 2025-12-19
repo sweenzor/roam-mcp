@@ -4,7 +4,7 @@ import json
 import logging
 import re
 import time
-from datetime import datetime, timedelta
+from datetime import datetime
 from typing import Any
 
 from dotenv import load_dotenv
@@ -15,13 +15,11 @@ from pydantic import BaseModel
 
 from mcp_server_roam.embedding import get_embedding_service
 from mcp_server_roam.roam_api import (
-    ORDINAL_DATE_FORMATS,
     BlockNotFoundError,
     InvalidQueryError,
     PageNotFoundError,
     RoamAPI,
     RoamAPIError,
-    ordinal_suffix,
 )
 from mcp_server_roam.vector_store import SyncStatus, get_vector_store
 
