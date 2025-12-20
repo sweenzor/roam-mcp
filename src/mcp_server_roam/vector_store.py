@@ -3,22 +3,23 @@
 import json
 import logging
 import sqlite3
+import time
 from enum import Enum
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+import numpy as np
 import sqlite_vec
+
+from mcp_server_roam.embedding import EMBEDDING_DIMENSIONS
 
 if TYPE_CHECKING:
     from numpy.typing import NDArray
-
-import numpy as np
 
 logger = logging.getLogger(__name__)
 
 # Configuration constants
 DEFAULT_DATA_DIR = Path.home() / ".roam-mcp"
-EMBEDDING_DIMENSIONS = 384
 
 
 class SyncStatus(str, Enum):
@@ -254,8 +255,6 @@ class VectorStore:
             )
 
         # Update embedded_at timestamp for these blocks
-        import time
-
         now = int(time.time() * 1000)
         cursor.execute(
             f"UPDATE blocks SET embedded_at = ? WHERE uid IN ({placeholders})",
@@ -284,6 +283,7 @@ class VectorStore:
                 - content: Block text content
                 - page_title: Title of containing page
                 - parent_chain: List of parent content strings
+                - edit_time: Edit timestamp in milliseconds
                 - similarity: Cosine similarity score (0-1)
         """
         logger.debug(
@@ -299,7 +299,8 @@ class VectorStore:
                 v.distance,
                 b.content,
                 b.page_title,
-                b.parent_chain
+                b.parent_chain,
+                b.edit_time
             FROM vec_embeddings v
             JOIN blocks b ON v.uid = b.uid
             WHERE v.embedding MATCH ? AND v.k = ?
@@ -328,47 +329,13 @@ class VectorStore:
                     "content": row["content"],
                     "page_title": row["page_title"],
                     "parent_chain": parent_chain,
+                    "edit_time": row["edit_time"] or 0,
                     "similarity": similarity,
                 }
             )
 
         logger.debug("Vector search returned %d results", len(results))
         return results
-
-    def get_blocks_needing_embedding(self, limit: int = 1000) -> list[dict]:
-        """Get blocks that have been stored but not yet embedded.
-
-        Args:
-            limit: Maximum number of blocks to return.
-
-        Returns:
-            List of block dictionaries.
-        """
-        cursor = self.conn.execute(
-            """
-            SELECT uid, content, page_title, parent_chain
-            FROM blocks
-            WHERE embedded_at IS NULL
-            LIMIT ?
-            """,
-            (limit,),
-        )
-
-        blocks = []
-        for row in cursor:
-            parent_chain = (
-                json.loads(row["parent_chain"]) if row["parent_chain"] else None
-            )
-            blocks.append(
-                {
-                    "uid": row["uid"],
-                    "content": row["content"],
-                    "page_title": row["page_title"],
-                    "parent_chain": parent_chain,
-                }
-            )
-
-        return blocks
 
     def drop_all_data(self) -> None:
         """Drop all data from the store (for full resync)."""

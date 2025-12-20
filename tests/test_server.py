@@ -5,19 +5,7 @@ from unittest.mock import MagicMock, patch
 from mcp_server_roam.server import (
     create_block,
     get_page,
-    hello_world,
 )
-
-
-def test_hello_world() -> None:
-    """Test hello world tool with default and custom names."""
-    # Test with default value
-    result = hello_world()
-    assert "Hello, World!" in result
-
-    # Test with custom name
-    result = hello_world("Roam")
-    assert "Hello, Roam!" in result
 
 
 @patch("mcp_server_roam.server.get_roam_client")

@@ -31,7 +31,8 @@ RATE_LIMIT_INITIAL_BACKOFF = 10.0  # Roam rate limit is 50 req/min, so wait long
 
 # Date format constants for daily notes
 # These are the common formats used by Roam Research for daily note page titles
-DATE_FORMAT_LONG_ORDINAL = "%B %dth, %Y"  # "June 13th, 2025" (with ordinal)
+# Note: ORDINAL is a special marker - actual date string is built with ordinal_suffix()
+DATE_FORMAT_ORDINAL = "ordinal"  # "June 13th, 2025" (with ordinal suffix)
 DATE_FORMAT_LONG = "%B %d, %Y"  # "June 13, 2025"
 DATE_FORMAT_US_DASH = "%m-%d-%Y"  # "06-13-2025"
 DATE_FORMAT_ISO = "%Y-%m-%d"  # "2025-06-13"
@@ -40,18 +41,10 @@ DATE_FORMAT_US_SLASH = "%m/%d/%Y"  # "06/13/2025"
 DATE_FORMAT_ISO_SLASH = "%Y/%m/%d"  # "2025/06/13"
 DATE_FORMAT_EU_SLASH = "%d/%m/%Y"  # "13/06/2025"
 
-# Ordinal format variations (1st, 2nd, 3rd, 4th suffixes)
-ORDINAL_DATE_FORMATS = (
-    "%B %dth, %Y",
-    "%B %dst, %Y",
-    "%B %dnd, %Y",
-    "%B %drd, %Y",
-)
-
 # All supported daily note formats to try during auto-detection
 DAILY_NOTE_FORMATS = (
     DATE_FORMAT_LONG,  # "June 13, 2025"
-    *ORDINAL_DATE_FORMATS,  # "June 13th, 2025" variants
+    DATE_FORMAT_ORDINAL,  # "June 13th, 2025" (with ordinal)
     DATE_FORMAT_US_DASH,  # "06-13-2025"
     DATE_FORMAT_ISO,  # "2025-06-13"
     DATE_FORMAT_EU_DASH,  # "13-06-2025"
@@ -712,7 +705,7 @@ class RoamAPI:
 
         for fmt in DAILY_NOTE_FORMATS:
             try:
-                if fmt in ORDINAL_DATE_FORMATS:
+                if fmt == DATE_FORMAT_ORDINAL:
                     date_str = today.strftime(f"%B %d{ordinal_suffix(today.day)}, %Y")
                 else:
                     date_str = today.strftime(fmt)
@@ -766,7 +759,7 @@ class RoamAPI:
         for i in range(days):
             date = datetime.now() - timedelta(days=i)
 
-            if date_format in ORDINAL_DATE_FORMATS:
+            if date_format == DATE_FORMAT_ORDINAL:
                 date_str = date.strftime(f"%B %d{ordinal_suffix(date.day)}, %Y")
             else:
                 date_str = date.strftime(date_format)
@@ -884,8 +877,14 @@ class RoamAPI:
 
         return result
 
-    def get_all_blocks_for_sync(self) -> list[dict[str, Any]]:
-        """Fetch all blocks with metadata for vector index sync.
+    def get_blocks_for_sync(
+        self, since_timestamp: int | None = None
+    ) -> list[dict[str, Any]]:
+        """Fetch blocks with metadata for vector index sync.
+
+        Args:
+            since_timestamp: If provided, only fetch blocks modified after this
+                timestamp (in milliseconds since epoch). If None, fetches all blocks.
 
         Returns:
             List of block dictionaries with keys:
@@ -895,14 +894,25 @@ class RoamAPI:
                 - page_uid: UID of the containing page
                 - page_title: Title of the containing page
         """
-        query = """[:find ?uid ?string ?edit-time ?page-uid ?page-title
-                    :where
-                    [?b :block/uid ?uid]
-                    [?b :block/string ?string]
-                    [?b :edit/time ?edit-time]
-                    [?b :block/page ?page]
-                    [?page :block/uid ?page-uid]
-                    [?page :node/title ?page-title]]"""
+        if since_timestamp is not None:
+            query = f"""[:find ?uid ?string ?edit-time ?page-uid ?page-title
+                         :where
+                         [?b :block/uid ?uid]
+                         [?b :block/string ?string]
+                         [?b :edit/time ?edit-time]
+                         [(> ?edit-time {since_timestamp})]
+                         [?b :block/page ?page]
+                         [?page :block/uid ?page-uid]
+                         [?page :node/title ?page-title]]"""
+        else:
+            query = """[:find ?uid ?string ?edit-time ?page-uid ?page-title
+                        :where
+                        [?b :block/uid ?uid]
+                        [?b :block/string ?string]
+                        [?b :edit/time ?edit-time]
+                        [?b :block/page ?page]
+                        [?page :block/uid ?page-uid]
+                        [?page :node/title ?page-title]]"""
 
         results = self.run_query(query)
         blocks = []
@@ -918,43 +928,12 @@ class RoamAPI:
                 }
             )
 
-        logger.info("Fetched %d blocks for sync", len(blocks))
-        return blocks
-
-    def get_blocks_modified_since(self, timestamp: int) -> list[dict[str, Any]]:
-        """Fetch blocks modified since a given timestamp.
-
-        Args:
-            timestamp: Timestamp in milliseconds since epoch.
-
-        Returns:
-            List of block dictionaries (same format as get_all_blocks_for_sync).
-        """
-        query = f"""[:find ?uid ?string ?edit-time ?page-uid ?page-title
-                     :where
-                     [?b :block/uid ?uid]
-                     [?b :block/string ?string]
-                     [?b :edit/time ?edit-time]
-                     [(> ?edit-time {timestamp})]
-                     [?b :block/page ?page]
-                     [?page :block/uid ?page-uid]
-                     [?page :node/title ?page-title]]"""
-
-        results = self.run_query(query)
-        blocks = []
-        for row in results:
-            uid, content, edit_time, page_uid, page_title = row
-            blocks.append(
-                {
-                    "uid": uid,
-                    "content": content,
-                    "edit_time": edit_time,
-                    "page_uid": page_uid,
-                    "page_title": page_title,
-                }
+        if since_timestamp is not None:
+            logger.info(
+                "Fetched %d blocks modified since %d", len(blocks), since_timestamp
             )
-
-        logger.info("Fetched %d blocks modified since %d", len(blocks), timestamp)
+        else:
+            logger.info("Fetched %d blocks for sync", len(blocks))
         return blocks
 
     def get_block_parent_chain(self, block_uid: str) -> list[str]:
