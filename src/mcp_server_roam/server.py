@@ -120,6 +120,22 @@ class GetBacklinks(BaseModel):
     limit: int = 20
 
 
+class QuickCaptureEnrich(BaseModel):
+    """Input schema for quick_capture_enrich tool."""
+
+    note: str
+
+
+class QuickCaptureCommit(BaseModel):
+    """Input schema for quick_capture_commit tool."""
+
+    note: str
+
+
+# Minimum page name length to match (avoid false positives)
+MIN_PAGE_NAME_LENGTH = 3
+
+
 # Tool implementation functions
 def get_page(
     title: str, include_backlinks: bool = True, max_backlinks: int = 10
@@ -841,6 +857,161 @@ def get_backlinks(page_title: str, limit: int = 20) -> str:
         return f"Error fetching backlinks: {str(e)}"
 
 
+def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
+    """Enrich a note by adding [[page links]] for matching page names.
+
+    Matches are case-insensitive but preserve the original case from the graph.
+    Longer page names are matched first to avoid partial matches.
+    Only matches whole words/phrases (not substrings within words).
+
+    Args:
+        note: The raw note text to enrich.
+        page_titles: List of all page titles from the graph.
+
+    Returns:
+        Dict with 'enriched_note' and 'matches_found' list.
+    """
+    # Filter pages by minimum length and sort by length descending
+    filtered_pages = [p for p in page_titles if len(p) >= MIN_PAGE_NAME_LENGTH]
+    sorted_pages = sorted(filtered_pages, key=len, reverse=True)
+
+    # Track which positions are already linked (to avoid double-linking)
+    linked_positions: set[tuple[int, int]] = set()
+
+    # Find existing links in the note and mark their positions
+    existing_links = list(re.finditer(r"\[\[([^\]]+)\]\]", note))
+    for match in existing_links:
+        linked_positions.add((match.start(), match.end()))
+
+    # Also find existing #tags
+    existing_tags = list(re.finditer(r"#([\w-]+)", note))
+    for match in existing_tags:
+        linked_positions.add((match.start(), match.end()))
+
+    matches_found: list[str] = []
+    replacements: list[tuple[int, int, str, str]] = []  # (start, end, original, page)
+
+    for page in sorted_pages:
+        # Skip if this page is already linked in the note (case-insensitive check)
+        # This avoids creating duplicate links for the same page
+        if re.search(rf"\[\[{re.escape(page)}\]\]", note, re.IGNORECASE):
+            continue
+
+        # Escape special regex characters in page name
+        escaped_page = re.escape(page)
+
+        # Build a pattern that works with word boundaries
+        # For page names that start/end with non-word chars, use lookarounds
+        first_char = page[0] if page else ""
+        last_char = page[-1] if page else ""
+
+        # Check if first/last chars are word characters
+        first_is_word = bool(re.match(r"\w", first_char))
+        last_is_word = bool(re.match(r"\w", last_char))
+
+        # Build appropriate boundary patterns
+        if first_is_word:
+            start_boundary = r"\b"
+        else:
+            # Use lookbehind to ensure not preceded by word char
+            start_boundary = r"(?<!\w)"
+
+        if last_is_word:
+            end_boundary = r"\b"
+        else:
+            # Use lookahead to ensure not followed by word char
+            end_boundary = r"(?!\w)"
+
+        pattern = rf"{start_boundary}{escaped_page}{end_boundary}"
+
+        for match in re.finditer(pattern, note, re.IGNORECASE):
+            start, end = match.start(), match.end()
+
+            # Check if this position overlaps with any existing link
+            overlaps = False
+            for linked_start, linked_end in linked_positions:
+                if start < linked_end and end > linked_start:
+                    overlaps = True
+                    break
+
+            if not overlaps:
+                # Store the replacement (use the canonical page title)
+                original_text = match.group()
+                replacements.append((start, end, original_text, page))
+                linked_positions.add((start, end))
+                if page not in matches_found:
+                    matches_found.append(page)
+
+    # Apply replacements from end to start to preserve positions
+    replacements.sort(key=lambda x: x[0], reverse=True)
+    enriched = note
+    for start, end, original, page in replacements:
+        enriched = enriched[:start] + f"[[{page}]]" + enriched[end:]
+
+    return {"enriched_note": enriched, "matches_found": matches_found}
+
+
+def quick_capture_enrich(note: str) -> str:
+    """Enrich a note with page links based on existing pages in the graph.
+
+    Args:
+        note: The raw note text to enrich.
+
+    Returns:
+        JSON string with enriched_note, matches_found, and daily_note_title.
+    """
+    try:
+        roam = get_roam_client()
+
+        # Get all page titles
+        page_titles = roam.get_all_page_titles()
+        logger.info("Fetched %d page titles for enrichment", len(page_titles))
+
+        # Enrich the note
+        result = enrich_note_with_links(note, page_titles)
+
+        # Get today's daily note title
+        daily_note_title = roam.get_todays_daily_note_title()
+
+        return json.dumps(
+            {
+                "enriched_note": result["enriched_note"],
+                "matches_found": result["matches_found"],
+                "daily_note_title": daily_note_title,
+                "original_note": note,
+            },
+            indent=2,
+        )
+
+    except RoamAPIError as e:
+        return json.dumps({"error": f"Error enriching note: {str(e)}"})
+
+
+def quick_capture_commit(note: str) -> str:
+    """Append a note to today's daily note page.
+
+    Args:
+        note: The note text to append (can be enriched or plain).
+
+    Returns:
+        Confirmation message with daily note title and block UID.
+    """
+    try:
+        roam = get_roam_client()
+
+        result = roam.append_block_to_daily_note(note)
+
+        return (
+            f"Added to {result['daily_note_title']}\n"
+            f"Block UID: {result['block_uid']}"
+        )
+
+    except PageNotFoundError as e:
+        return f"Error: {str(e)}"
+    except RoamAPIError as e:
+        return f"Error adding note: {str(e)}"
+
+
 # Create the server instance - this is what mcp dev looks for
 server = Server("mcp-roam")
 
@@ -908,6 +1079,23 @@ async def list_tools() -> list[Tool]:
             description="Get all blocks that reference a page",
             inputSchema=GetBacklinks.model_json_schema(),
         ),
+        Tool(
+            name="quick_capture_enrich",
+            description=(
+                "Enrich a quick note with [[page links]] and #tags based on "
+                "existing pages in your Roam graph. Returns the enriched note "
+                "for review before committing."
+            ),
+            inputSchema=QuickCaptureEnrich.model_json_schema(),
+        ),
+        Tool(
+            name="quick_capture_commit",
+            description=(
+                "Append a note to today's daily note page. "
+                "Use after reviewing the enriched note from quick_capture_enrich."
+            ),
+            inputSchema=QuickCaptureCommit.model_json_schema(),
+        ),
     ]
 
 
@@ -971,6 +1159,10 @@ async def call_tool(name: str, arguments: dict) -> list[TextContent]:
                 arguments["page_title"],
                 arguments.get("limit", 20),
             )
+        case "quick_capture_enrich":
+            result = quick_capture_enrich(arguments["note"])
+        case "quick_capture_commit":
+            result = quick_capture_commit(arguments["note"])
         case _:
             raise ValueError(f"Unknown tool: {name}")
 

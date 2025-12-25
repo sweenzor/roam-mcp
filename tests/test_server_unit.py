@@ -20,6 +20,7 @@ from mcp_server_roam.server import (
     call_tool,
     create_block,
     daily_context,
+    enrich_note_with_links,
     extract_references,
     format_edit_time,
     get_backlinks,
@@ -27,6 +28,8 @@ from mcp_server_roam.server import (
     get_page,
     get_roam_client,
     list_tools,
+    quick_capture_commit,
+    quick_capture_enrich,
     raw_query,
     search_by_text,
     semantic_search,
@@ -1477,7 +1480,9 @@ class TestListTools:
         assert "search_by_text" in tool_names
         assert "raw_query" in tool_names
         assert "get_backlinks" in tool_names
-        assert len(tools) == 9
+        assert "quick_capture_enrich" in tool_names
+        assert "quick_capture_commit" in tool_names
+        assert len(tools) == 11
 
 
 # Tests for serve function
@@ -2189,3 +2194,239 @@ class TestSemanticSearchEnrichments:
         assert "Modified:" in result
         assert "Jan" in result
         assert "2025" in result
+
+
+class TestEnrichNoteWithLinks:
+    """Tests for the enrich_note_with_links function."""
+
+    def test_no_matches(self) -> None:
+        """Test note with no matching page names."""
+        note = "This is a simple note"
+        page_titles = ["Other Page", "Another Page"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        assert result["enriched_note"] == note
+        assert result["matches_found"] == []
+
+    def test_single_match(self) -> None:
+        """Test note with a single matching page name."""
+        note = "Meeting with John about the project"
+        page_titles = ["John", "Project", "Other"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        assert result["enriched_note"] == "Meeting with [[John]] about the [[Project]]"
+        assert "John" in result["matches_found"]
+        assert "Project" in result["matches_found"]
+
+    def test_case_insensitive_match(self) -> None:
+        """Test case-insensitive matching with original case preserved."""
+        note = "Discussed the project with john yesterday"
+        page_titles = ["John", "Project"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        # Should use the canonical page title case
+        assert "[[John]]" in result["enriched_note"]
+        assert "[[Project]]" in result["enriched_note"]
+
+    def test_longer_match_takes_priority(self) -> None:
+        """Test that longer page names are matched first."""
+        note = "Working on AI Strategy today"
+        page_titles = ["AI", "AI Strategy", "Strategy"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        # Should match "AI Strategy" not just "AI" or "Strategy"
+        assert result["enriched_note"] == "Working on [[AI Strategy]] today"
+        assert result["matches_found"] == ["AI Strategy"]
+
+    def test_already_linked_not_double_linked(self) -> None:
+        """Test that already linked text is not double-linked."""
+        note = "Meeting with [[John]] about John's project"
+        page_titles = ["John", "Project"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        # Should not create [[[[John]]]] or link John again
+        assert result["enriched_note"].count("[[John]]") == 1
+        assert "[[Project]]" in result["enriched_note"]
+
+    def test_existing_tag_not_double_linked(self) -> None:
+        """Test that existing #tags are not linked."""
+        note = "Working on #project stuff related to Project"
+        page_titles = ["project", "stuff"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        # The first "project" is a tag, should not be linked
+        # The second "Project" should be linked (it's not a tag)
+        assert "#project" in result["enriched_note"]
+        assert "[[project]]" in result["enriched_note"]
+
+    def test_whole_word_matching(self) -> None:
+        """Test that only whole words are matched."""
+        note = "Working on projects and projecting the timeline"
+        page_titles = ["Project"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        # "projects" and "projecting" should not match "Project"
+        assert result["enriched_note"] == note
+        assert result["matches_found"] == []
+
+    def test_minimum_length_filter(self) -> None:
+        """Test that short page names (< 3 chars) are not matched."""
+        note = "AI is amazing"
+        page_titles = ["AI", "amazing"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        # "AI" is only 2 chars, should not be matched
+        # "amazing" is 7 chars, should be matched
+        assert "[[AI]]" not in result["enriched_note"]
+        assert "[[amazing]]" in result["enriched_note"]
+
+    def test_multiple_occurrences(self) -> None:
+        """Test that multiple occurrences of the same page are all linked."""
+        note = "John met with John to discuss John's ideas"
+        page_titles = ["John"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        # All occurrences should be linked
+        assert result["enriched_note"].count("[[John]]") == 3
+
+    def test_special_regex_characters(self) -> None:
+        """Test page names with special regex characters."""
+        note = "Check the C++ code for updates"
+        page_titles = ["C++"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        assert "[[C++]]" in result["enriched_note"]
+
+    def test_phrase_with_spaces(self) -> None:
+        """Test matching page names that are phrases with spaces."""
+        note = "The AI research team is working on machine learning"
+        page_titles = ["AI research", "machine learning"]
+
+        result = enrich_note_with_links(note, page_titles)
+
+        assert "[[AI research]]" in result["enriched_note"]
+        assert "[[machine learning]]" in result["enriched_note"]
+
+
+class TestQuickCaptureEnrich:
+    """Tests for the quick_capture_enrich function."""
+
+    def test_enriches_note_successfully(self, mocker: MockerFixture) -> None:
+        """Test that quick_capture_enrich returns enriched note."""
+        import json
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_all_page_titles.return_value = ["John", "Project", "Meeting"]
+        mock_roam.get_todays_daily_note_title.return_value = "December 25th, 2025"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = quick_capture_enrich("Meeting with John about Project")
+        parsed = json.loads(result)
+
+        assert "enriched_note" in parsed
+        assert "[[John]]" in parsed["enriched_note"]
+        assert "[[Project]]" in parsed["enriched_note"]
+        assert "[[Meeting]]" in parsed["enriched_note"]
+        assert parsed["daily_note_title"] == "December 25th, 2025"
+        assert "John" in parsed["matches_found"]
+
+    def test_handles_api_error(self, mocker: MockerFixture) -> None:
+        """Test that API errors are handled gracefully."""
+        import json
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_all_page_titles.side_effect = RoamAPIError("API Error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = quick_capture_enrich("Test note")
+        parsed = json.loads(result)
+
+        assert "error" in parsed
+
+
+class TestQuickCaptureCommit:
+    """Tests for the quick_capture_commit function."""
+
+    def test_commits_note_successfully(self, mocker: MockerFixture) -> None:
+        """Test that quick_capture_commit appends to daily note."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.append_block_to_daily_note.return_value = {
+            "block_uid": "new-block-123",
+            "daily_note_title": "December 25th, 2025",
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = quick_capture_commit("Test [[note]] content")
+
+        assert "December 25th, 2025" in result
+        assert "new-block-123" in result
+        mock_roam.append_block_to_daily_note.assert_called_once_with(
+            "Test [[note]] content"
+        )
+
+    def test_handles_page_not_found(self, mocker: MockerFixture) -> None:
+        """Test that PageNotFoundError is handled."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.append_block_to_daily_note.side_effect = PageNotFoundError(
+            "Daily note not found"
+        )
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = quick_capture_commit("Test note")
+
+        assert "Error:" in result
+
+    def test_handles_api_error(self, mocker: MockerFixture) -> None:
+        """Test that API errors are handled gracefully."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.append_block_to_daily_note.side_effect = RoamAPIError("API Error")
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = quick_capture_commit("Test note")
+
+        assert "Error adding note:" in result
+
+
+class TestQuickCaptureCallTool:
+    """Tests for quick capture tools via call_tool handler."""
+
+    @pytest.mark.asyncio
+    async def test_call_quick_capture_enrich(self, mocker: MockerFixture) -> None:
+        """Test calling quick_capture_enrich via call_tool."""
+        import json
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_all_page_titles.return_value = ["Test"]
+        mock_roam.get_todays_daily_note_title.return_value = "December 25th, 2025"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = await call_tool("quick_capture_enrich", {"note": "Test note"})
+
+        assert len(result) == 1
+        parsed = json.loads(result[0].text)
+        assert "enriched_note" in parsed
+
+    @pytest.mark.asyncio
+    async def test_call_quick_capture_commit(self, mocker: MockerFixture) -> None:
+        """Test calling quick_capture_commit via call_tool."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.append_block_to_daily_note.return_value = {
+            "block_uid": "test-uid",
+            "daily_note_title": "December 25th, 2025",
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        result = await call_tool("quick_capture_commit", {"note": "Test note"})
+
+        assert len(result) == 1
+        assert "December 25th, 2025" in result[0].text

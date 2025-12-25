@@ -628,6 +628,35 @@ class RoamAPI:
         pattern = "[* {:block/children ...}]"
         return self.pull(eid, pattern)
 
+    def get_all_page_titles(self) -> list[str]:
+        """Get all page titles in the graph.
+
+        Returns:
+            List of all page titles.
+
+        Raises:
+            RoamAPIError: If the API request fails.
+        """
+        query = "[:find ?title :where [?e :node/title ?title]]"
+        results = self.run_query(query)
+        return [r[0] for r in results if r[0]]
+
+    def get_todays_daily_note_title(self) -> str:
+        """Get today's daily note page title in the correct format.
+
+        Uses the cached daily note format from find_daily_note_format().
+
+        Returns:
+            Today's date formatted as the daily note page title.
+        """
+        date_format = self.find_daily_note_format()
+        today = datetime.now()
+
+        if date_format == DATE_FORMAT_ORDINAL:
+            return today.strftime(f"%B {today.day}{ordinal_suffix(today.day)}, %Y")
+        else:
+            return today.strftime(date_format)
+
     def create_block(
         self,
         content: str,
@@ -686,6 +715,48 @@ class RoamAPI:
         }
         resp = self.call(path, body)
         return resp.json()
+
+    def append_block_to_daily_note(self, content: str) -> dict[str, Any]:
+        """Append a block to the end of today's daily note page.
+
+        Args:
+            content: Content of the block to create.
+
+        Returns:
+            Dict with 'block_uid' and 'daily_note_title'.
+
+        Raises:
+            PageNotFoundError: If the daily notes page is not found.
+            RoamAPIError: If the API request fails.
+        """
+        daily_note_title = self.get_todays_daily_note_title()
+
+        # Find the daily note page UID
+        sanitized_title = self._sanitize_query_input(daily_note_title)
+        query = f'[:find ?uid :where [?e :node/title "{sanitized_title}"] [?e :block/uid ?uid]]'
+        results = self.run_query(query)
+
+        if not results or len(results) == 0:
+            raise PageNotFoundError(
+                f"Daily Notes page for '{daily_note_title}' not found"
+            )
+
+        page_uid = results[0][0]
+
+        # Create block at the end of the page (order: "last")
+        path = f"/api/graph/{self.graph_name}/write"
+        body = {
+            "action": "create-block",
+            "location": {"parent-uid": page_uid, "order": "last"},
+            "block": {"string": content},
+        }
+        resp = self.call(path, body)
+        result = resp.json()
+
+        return {
+            "block_uid": result.get("uid", "unknown"),
+            "daily_note_title": daily_note_title,
+        }
 
     def find_daily_note_format(self) -> str:
         """Find the correct date format for daily notes by testing common formats.
