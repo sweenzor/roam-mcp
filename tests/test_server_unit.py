@@ -18,16 +18,22 @@ from mcp_server_roam.roam_api import (
 )
 from mcp_server_roam.server import (
     call_tool,
+    count_blocks,
     create_block,
     daily_context,
+    detect_indent_unit,
+    enrich_blocks,
     enrich_note_with_links,
     extract_references,
+    format_blocks_preview,
     format_edit_time,
     get_backlinks,
     get_block_context,
     get_page,
     get_roam_client,
+    is_multiline_note,
     list_tools,
+    parse_note_to_blocks,
     quick_capture_commit,
     quick_capture_enrich,
     raw_query,
@@ -2430,3 +2436,372 @@ class TestQuickCaptureCallTool:
 
         assert len(result) == 1
         assert "December 25th, 2025" in result[0].text
+
+
+# Tests for multi-line parsing functions
+class TestDetectIndentUnit:
+    """Tests for the detect_indent_unit function."""
+
+    def test_two_space_indent(self) -> None:
+        """Test detection of 2-space indentation."""
+        lines = ["Parent", "  Child", "    Grandchild"]
+        assert detect_indent_unit(lines) == 2
+
+    def test_four_space_indent(self) -> None:
+        """Test detection of 4-space indentation."""
+        lines = ["Parent", "    Child", "        Grandchild"]
+        assert detect_indent_unit(lines) == 4
+
+    def test_mixed_indent_uses_gcd(self) -> None:
+        """Test that mixed indentation uses GCD."""
+        lines = ["Parent", "  Level 1", "    Level 2", "      Level 3"]
+        # GCD of 2, 4, 6 is 2
+        assert detect_indent_unit(lines) == 2
+
+    def test_tabs_expanded(self) -> None:
+        """Test that tabs are expanded correctly."""
+        lines = ["Parent", "\tChild"]
+        # Tabs expand to 2 spaces by default
+        assert detect_indent_unit(lines) == 2
+
+    def test_no_indentation(self) -> None:
+        """Test lines with no indentation return default."""
+        lines = ["Line 1", "Line 2", "Line 3"]
+        assert detect_indent_unit(lines) == 2  # Default
+
+    def test_empty_lines_ignored(self) -> None:
+        """Test that empty lines are ignored."""
+        lines = ["Parent", "", "  Child", ""]
+        assert detect_indent_unit(lines) == 2
+
+
+class TestParseNoteToBlocks:
+    """Tests for the parse_note_to_blocks function."""
+
+    def test_single_line(self) -> None:
+        """Test parsing a single line note."""
+        note = "Simple single line note"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 1
+        assert blocks[0]["content"] == "Simple single line note"
+        assert "children" not in blocks[0]
+
+    def test_single_line_with_bullet(self) -> None:
+        """Test parsing a single line with bullet prefix."""
+        note = "- Bulleted item"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 1
+        assert blocks[0]["content"] == "Bulleted item"
+
+    def test_two_level_nesting(self) -> None:
+        """Test parsing with two levels of nesting."""
+        note = "Parent\n  Child"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 1
+        assert blocks[0]["content"] == "Parent"
+        assert len(blocks[0]["children"]) == 1
+        assert blocks[0]["children"][0]["content"] == "Child"
+
+    def test_three_level_nesting(self) -> None:
+        """Test parsing with three levels of nesting."""
+        note = "Parent\n  Child\n    Grandchild"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 1
+        assert blocks[0]["content"] == "Parent"
+        assert len(blocks[0]["children"]) == 1
+        assert blocks[0]["children"][0]["content"] == "Child"
+        assert len(blocks[0]["children"][0]["children"]) == 1
+        assert blocks[0]["children"][0]["children"][0]["content"] == "Grandchild"
+
+    def test_multiple_siblings(self) -> None:
+        """Test parsing multiple sibling blocks."""
+        note = "First\nSecond\nThird"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 3
+        assert blocks[0]["content"] == "First"
+        assert blocks[1]["content"] == "Second"
+        assert blocks[2]["content"] == "Third"
+
+    def test_complex_structure(self) -> None:
+        """Test parsing a complex nested structure."""
+        note = (
+            "Meeting notes\n"
+            "  - First point\n"
+            "    - Sub-point 1\n"
+            "    - Sub-point 2\n"
+            "  - Second point\n"
+            "    - Another sub"
+        )
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 1
+        assert blocks[0]["content"] == "Meeting notes"
+        assert len(blocks[0]["children"]) == 2
+        assert blocks[0]["children"][0]["content"] == "First point"
+        assert len(blocks[0]["children"][0]["children"]) == 2
+        assert blocks[0]["children"][1]["content"] == "Second point"
+
+    def test_bullet_markers_removed(self) -> None:
+        """Test that various bullet markers are removed."""
+        note = "- Dash bullet\n  * Star bullet\n    • Dot bullet"
+        blocks = parse_note_to_blocks(note)
+
+        assert blocks[0]["content"] == "Dash bullet"
+        assert blocks[0]["children"][0]["content"] == "Star bullet"
+        assert blocks[0]["children"][0]["children"][0]["content"] == "Dot bullet"
+
+    def test_empty_lines_skipped(self) -> None:
+        """Test that empty lines are skipped."""
+        note = "First\n\nSecond\n\n  Child"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 2
+        assert blocks[0]["content"] == "First"
+        assert blocks[1]["content"] == "Second"
+
+    def test_empty_note(self) -> None:
+        """Test parsing an empty note."""
+        blocks = parse_note_to_blocks("")
+        assert blocks == []
+
+    def test_whitespace_only(self) -> None:
+        """Test parsing whitespace-only note."""
+        blocks = parse_note_to_blocks("   \n\n   ")
+        assert blocks == []
+
+    def test_four_space_indent(self) -> None:
+        """Test parsing with 4-space indentation."""
+        note = "Parent\n    Child\n        Grandchild"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 1
+        assert blocks[0]["content"] == "Parent"
+        assert len(blocks[0]["children"]) == 1
+        assert blocks[0]["children"][0]["content"] == "Child"
+        assert len(blocks[0]["children"][0]["children"]) == 1
+
+    def test_tab_indent(self) -> None:
+        """Test parsing with tab indentation."""
+        note = "Parent\n\tChild\n\t\tGrandchild"
+        blocks = parse_note_to_blocks(note)
+
+        assert len(blocks) == 1
+        assert blocks[0]["content"] == "Parent"
+        assert len(blocks[0]["children"]) == 1
+        assert blocks[0]["children"][0]["content"] == "Child"
+
+
+class TestFormatBlocksPreview:
+    """Tests for the format_blocks_preview function."""
+
+    def test_single_block(self) -> None:
+        """Test formatting a single block."""
+        blocks = [{"content": "Only block"}]
+        result = format_blocks_preview(blocks)
+
+        assert result == "Only block"
+
+    def test_nested_blocks(self) -> None:
+        """Test formatting nested blocks."""
+        blocks = [
+            {
+                "content": "Parent",
+                "children": [{"content": "Child"}],
+            }
+        ]
+        result = format_blocks_preview(blocks)
+
+        assert "Parent" in result
+        assert "Child" in result
+        assert "└──" in result or "├──" in result
+
+    def test_multiple_siblings(self) -> None:
+        """Test formatting multiple sibling blocks."""
+        blocks = [
+            {"content": "First"},
+            {"content": "Second"},
+        ]
+        result = format_blocks_preview(blocks)
+
+        assert "First" in result
+        assert "Second" in result
+
+
+class TestCountBlocks:
+    """Tests for the count_blocks function."""
+
+    def test_single_block(self) -> None:
+        """Test counting a single block."""
+        blocks = [{"content": "Only"}]
+        assert count_blocks(blocks) == 1
+
+    def test_nested_blocks(self) -> None:
+        """Test counting nested blocks."""
+        blocks = [
+            {
+                "content": "Parent",
+                "children": [
+                    {"content": "Child 1"},
+                    {"content": "Child 2"},
+                ],
+            }
+        ]
+        assert count_blocks(blocks) == 3
+
+    def test_deeply_nested(self) -> None:
+        """Test counting deeply nested blocks."""
+        blocks = [
+            {
+                "content": "L1",
+                "children": [
+                    {
+                        "content": "L2",
+                        "children": [
+                            {
+                                "content": "L3",
+                                "children": [{"content": "L4"}],
+                            }
+                        ],
+                    }
+                ],
+            }
+        ]
+        assert count_blocks(blocks) == 4
+
+
+class TestIsMultilineNote:
+    """Tests for the is_multiline_note function."""
+
+    def test_single_line(self) -> None:
+        """Test single line note."""
+        assert is_multiline_note("Single line") is False
+
+    def test_multiple_lines(self) -> None:
+        """Test multiple non-empty lines."""
+        assert is_multiline_note("Line 1\nLine 2") is True
+
+    def test_line_with_empty_lines(self) -> None:
+        """Test line with only empty lines following."""
+        assert is_multiline_note("Line 1\n\n\n") is False
+
+    def test_multiple_with_empty_between(self) -> None:
+        """Test multiple lines with empty lines between."""
+        assert is_multiline_note("Line 1\n\nLine 2") is True
+
+
+class TestEnrichBlocks:
+    """Tests for the enrich_blocks function."""
+
+    def test_enriches_single_block(self) -> None:
+        """Test enriching a single block."""
+        blocks = [{"content": "Meeting with John"}]
+        page_titles = ["John"]
+
+        enriched, matches = enrich_blocks(blocks, page_titles)
+
+        assert enriched[0]["content"] == "Meeting with [[John]]"
+        assert "John" in matches
+
+    def test_enriches_nested_blocks(self) -> None:
+        """Test enriching nested blocks."""
+        blocks = [
+            {
+                "content": "Meeting notes",
+                "children": [{"content": "Discussed with John"}],
+            }
+        ]
+        page_titles = ["John"]
+
+        enriched, matches = enrich_blocks(blocks, page_titles)
+
+        assert "[[John]]" in enriched[0]["children"][0]["content"]
+        assert "John" in matches
+
+    def test_deduplicates_matches(self) -> None:
+        """Test that matches are deduplicated."""
+        blocks = [
+            {"content": "John said"},
+            {"content": "John agreed"},
+        ]
+        page_titles = ["John"]
+
+        enriched, matches = enrich_blocks(blocks, page_titles)
+
+        assert matches.count("John") == 1
+
+
+class TestQuickCaptureEnrichMultiline:
+    """Tests for quick_capture_enrich with multi-line notes."""
+
+    def test_multiline_returns_block_count(self, mocker: MockerFixture) -> None:
+        """Test that multi-line notes include block_count in response."""
+        import json
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_all_page_titles.return_value = []
+        mock_roam.get_todays_daily_note_title.return_value = "December 26th, 2025"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        note = "Parent\n  Child"
+        result = json.loads(quick_capture_enrich(note))
+
+        assert result["block_count"] == 2
+        assert result["is_multiline"] is True
+        assert "preview" in result
+
+    def test_single_line_no_block_count(self, mocker: MockerFixture) -> None:
+        """Test that single-line notes don't include block_count."""
+        import json
+
+        mock_roam = mocker.MagicMock()
+        mock_roam.get_all_page_titles.return_value = []
+        mock_roam.get_todays_daily_note_title.return_value = "December 26th, 2025"
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        note = "Single line note"
+        result = json.loads(quick_capture_enrich(note))
+
+        assert "block_count" not in result
+        assert result["is_multiline"] is False
+
+
+class TestQuickCaptureCommitMultiline:
+    """Tests for quick_capture_commit with multi-line notes."""
+
+    def test_multiline_uses_batch_write(self, mocker: MockerFixture) -> None:
+        """Test that multi-line notes use batch write."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.append_blocks_to_daily_note.return_value = {
+            "block_count": 3,
+            "root_uid": "abc123",
+            "daily_note_title": "December 26th, 2025",
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        note = "Parent\n  Child\n    Grandchild"
+        result = quick_capture_commit(note)
+
+        mock_roam.append_blocks_to_daily_note.assert_called_once()
+        assert "3 blocks" in result
+        assert "December 26th, 2025" in result
+
+    def test_single_line_uses_single_write(self, mocker: MockerFixture) -> None:
+        """Test that single-line notes use single block write."""
+        mock_roam = mocker.MagicMock()
+        mock_roam.append_block_to_daily_note.return_value = {
+            "block_uid": "test-uid",
+            "daily_note_title": "December 26th, 2025",
+        }
+        mocker.patch(ROAM_CLIENT_PATH, return_value=mock_roam)
+
+        note = "Single line note"
+        result = quick_capture_commit(note)
+
+        mock_roam.append_block_to_daily_note.assert_called_once()
+        mock_roam.append_blocks_to_daily_note.assert_not_called()
+        assert "December 26th, 2025" in result

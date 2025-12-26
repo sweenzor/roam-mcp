@@ -652,7 +652,9 @@ class RoamAPI:
             and self._page_titles_cache is not None
             and (now - self._page_titles_cache_time) < cache_ttl
         ):
-            logger.debug("Using cached page titles (%d pages)", len(self._page_titles_cache))
+            logger.debug(
+                "Using cached page titles (%d pages)", len(self._page_titles_cache)
+            )
             return self._page_titles_cache
 
         # Fetch fresh data
@@ -760,7 +762,10 @@ class RoamAPI:
 
         # Find the daily note page UID
         sanitized_title = self._sanitize_query_input(daily_note_title)
-        query = f'[:find ?uid :where [?e :node/title "{sanitized_title}"] [?e :block/uid ?uid]]'
+        query = (
+            f'[:find ?uid :where [?e :node/title "{sanitized_title}"] '
+            "[?e :block/uid ?uid]]"
+        )
         results = self.run_query(query)
 
         if not results or len(results) == 0:
@@ -782,6 +787,125 @@ class RoamAPI:
 
         return {
             "block_uid": result.get("uid", "unknown"),
+            "daily_note_title": daily_note_title,
+        }
+
+    def batch_write(self, actions: list[dict[str, Any]]) -> dict[str, Any]:
+        """Execute multiple write actions atomically.
+
+        Args:
+            actions: List of write action dicts. Each should have 'action',
+                'location', and 'block' keys.
+
+        Returns:
+            API response containing UIDs of created blocks.
+
+        Raises:
+            RoamAPIError: If the API request fails.
+        """
+        path = f"/api/graph/{self.graph_name}/write"
+        body = {"action": "batch-actions", "actions": actions}
+        resp = self.call(path, body)
+        return resp.json()
+
+    def append_blocks_to_daily_note(
+        self, blocks: list[dict[str, Any]]
+    ) -> dict[str, Any]:
+        """Append multiple nested blocks to today's daily note.
+
+        Args:
+            blocks: List of block dicts with 'content' and optional 'children' keys.
+                Each child block also has 'content' and optional 'children'.
+                Example: [{'content': 'Parent', 'children': [{'content': 'Child'}]}]
+
+        Returns:
+            Dict with 'block_count', 'root_uid', and 'daily_note_title'.
+
+        Raises:
+            PageNotFoundError: If the daily notes page is not found.
+            RoamAPIError: If the API request fails.
+        """
+        daily_note_title = self.get_todays_daily_note_title()
+
+        # Find the daily note page UID
+        sanitized_title = self._sanitize_query_input(daily_note_title)
+        query = (
+            f'[:find ?uid :where [?e :node/title "{sanitized_title}"] '
+            "[?e :block/uid ?uid]]"
+        )
+        results = self.run_query(query)
+
+        if not results or len(results) == 0:
+            raise PageNotFoundError(
+                f"Daily Notes page for '{daily_note_title}' not found"
+            )
+
+        page_uid = results[0][0]
+
+        # Build batch actions with temporary UIDs (negative numbers)
+        actions: list[dict[str, Any]] = []
+        temp_uid_counter = -1
+        block_count = 0
+
+        def build_actions(
+            block_list: list[dict[str, Any]], parent_uid: str | int
+        ) -> int | None:
+            """Recursively build batch actions for nested blocks.
+
+            Returns the temp UID of the first block (for root_uid tracking).
+            """
+            nonlocal temp_uid_counter, block_count
+            first_uid = None
+
+            for i, block in enumerate(block_list):
+                temp_uid = temp_uid_counter
+                temp_uid_counter -= 1
+                block_count += 1
+
+                if first_uid is None:
+                    first_uid = temp_uid
+
+                action = {
+                    "action": "create-block",
+                    "location": {"parent-uid": parent_uid, "order": i},
+                    "block": {"uid": temp_uid, "string": block["content"]},
+                }
+                actions.append(action)
+
+                # Process children recursively
+                if block.get("children"):
+                    build_actions(block["children"], temp_uid)
+
+            return first_uid
+
+        # Build actions starting from the daily note page
+        # Use "last" order for the root blocks
+        first_temp_uid = None
+        for block in blocks:
+            temp_uid = temp_uid_counter
+            temp_uid_counter -= 1
+            block_count += 1
+
+            if first_temp_uid is None:
+                first_temp_uid = temp_uid
+
+            action = {
+                "action": "create-block",
+                "location": {"parent-uid": page_uid, "order": "last"},
+                "block": {"uid": temp_uid, "string": block["content"]},
+            }
+            actions.append(action)
+
+            # Process children recursively
+            if block.get("children"):
+                build_actions(block["children"], temp_uid)
+
+        # Execute batch write
+        result = self.batch_write(actions)
+
+        return {
+            "block_count": block_count,
+            "root_uid": result.get("uid", "unknown"),
             "daily_note_title": daily_note_title,
         }
 

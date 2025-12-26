@@ -226,7 +226,7 @@ The `daily_context` tool is a powerful feature for understanding your recent wor
 
 ## Quick Capture
 
-The `quick_capture_enrich` and `quick_capture_commit` tools provide an interactive two-step workflow for capturing notes with automatic page linking.
+The `quick_capture_enrich` and `quick_capture_commit` tools provide an interactive two-step workflow for capturing notes with automatic page linking. Supports both single-line and multi-line notes with nested block structures.
 
 ### Workflow
 
@@ -235,7 +235,7 @@ The `quick_capture_enrich` and `quick_capture_commit` tools provide an interacti
 3. **Approve/Edit**: You can approve or request changes
 4. **Commit**: Call `quick_capture_commit` to append to your daily note
 
-### Example
+### Single-Line Example
 
 ```
 User: "Had a meeting with John about the AI project roadmap"
@@ -244,7 +244,8 @@ Claude calls quick_capture_enrich, which returns:
 {
   "enriched_note": "Had a meeting with [[John]] about the [[AI project]] roadmap",
   "matches_found": ["John", "AI project"],
-  "daily_note_title": "December 25th, 2025"
+  "daily_note_title": "December 25th, 2025",
+  "is_multiline": false
 }
 
 Claude: "Here's your enriched note with 2 page links added:
@@ -257,6 +258,39 @@ User: "Yes!"
 Claude calls quick_capture_commit, returns:
   "Added to December 25th, 2025 (Block UID: abc123)"
 ```
+
+### Multi-Line Example
+
+```
+User: "Call with John
+- Discussed AI project
+  - Timeline looks good
+- Next steps
+  - Send docs"
+
+Claude calls quick_capture_enrich, which returns:
+{
+  "enriched_note": "Call with [[John]]\n- Discussed [[AI project]]\n  - Timeline looks good\n- Next steps\n  - Send docs",
+  "matches_found": ["John", "AI project"],
+  "daily_note_title": "December 25th, 2025",
+  "block_count": 5,
+  "preview": "Call with [[John]]\n├── Discussed [[AI project]]\n│   └── Timeline looks good\n└── Next steps\n    └── Send docs",
+  "is_multiline": true
+}
+
+Claude calls quick_capture_commit, returns:
+  "Added 5 blocks to December 25th, 2025
+   Root block UID: abc123"
+```
+
+### Multi-Line Features
+
+- **Flexible indentation**: Supports 2-space, 4-space, or tab indentation
+- **Auto-detect indent style**: Uses GCD of all indents to determine unit
+- **Optional bullets**: Works with `- `, `* `, `• ` or no bullets at all
+- **Nested blocks**: Creates proper parent/child block hierarchy in Roam
+- **Single API call**: Uses batch-actions for atomic multi-block creation
+- **Preview output**: Shows tree structure of parsed blocks before commit
 
 ### Matching Rules
 

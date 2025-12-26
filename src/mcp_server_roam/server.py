@@ -135,6 +135,190 @@ class QuickCaptureCommit(BaseModel):
 # Minimum page name length to match (avoid false positives)
 MIN_PAGE_NAME_LENGTH = 3
 
+# Default tab expansion width (tabs become this many spaces)
+DEFAULT_TAB_WIDTH = 2
+
+
+def detect_indent_unit(lines: list[str]) -> int:
+    """Detect the indentation unit (spaces per level).
+
+    Strategy:
+    1. Find all indentation levels used
+    2. Calculate GCD of all indent amounts
+    3. Default to 2 if can't determine
+
+    Args:
+        lines: List of lines to analyze.
+
+    Returns:
+        The detected indent unit (number of spaces per level).
+    """
+    from functools import reduce
+    from math import gcd
+
+    indents: set[int] = set()
+    for line in lines:
+        if line.strip():
+            # Expand tabs to spaces for counting
+            expanded = line.expandtabs(DEFAULT_TAB_WIDTH)
+            stripped = expanded.lstrip()
+            indent = len(expanded) - len(stripped)
+            if indent > 0:
+                indents.add(indent)
+
+    if not indents:
+        return DEFAULT_TAB_WIDTH
+
+    # Find GCD of all indents
+    return reduce(gcd, indents) or DEFAULT_TAB_WIDTH
+
+
+def parse_note_to_blocks(note: str) -> list[dict[str, Any]]:
+    """Parse any multi-line note format into a block tree.
+
+    Supports:
+    - Different indentation styles (2-space, 4-space, tabs)
+    - Optional bullet markers (-, *, •, ‣ or none)
+    - Mixed indentation (normalizes using GCD)
+
+    Args:
+        note: Multi-line note string.
+
+    Returns:
+        List of block dicts with 'content' and optional 'children' keys.
+        Single-line notes return a list with one block (no children).
+    """
+    lines = note.split("\n")
+
+    # Filter out empty lines
+    non_empty_lines = [line for line in lines if line.strip()]
+
+    if not non_empty_lines:
+        return []
+
+    # Single line case - return simple block
+    if len(non_empty_lines) == 1:
+        content = non_empty_lines[0].strip()
+        # Remove bullet prefix if present
+        for prefix in ["- ", "* ", "• ", "‣ "]:
+            if content.startswith(prefix):
+                content = content[len(prefix) :]
+                break
+        return [{"content": content}]
+
+    # Detect indent unit
+    indent_unit = detect_indent_unit(non_empty_lines)
+
+    # Parse into block tree
+    root_blocks: list[dict[str, Any]] = []
+    # Stack: (children list, level)
+    stack: list[tuple[list[dict[str, Any]], int]] = [(root_blocks, -1)]
+
+    for line in lines:
+        if not line.strip():
+            continue
+
+        # Expand tabs and calculate level
+        expanded = line.expandtabs(indent_unit)
+        stripped = expanded.lstrip()
+        indent = len(expanded) - len(stripped)
+        level = indent // indent_unit if indent_unit > 0 else 0
+
+        # Remove optional bullet prefix
+        content = stripped
+        for prefix in ["- ", "* ", "• ", "‣ "]:
+            if content.startswith(prefix):
+                content = content[len(prefix) :]
+                break
+
+        block: dict[str, Any] = {"content": content, "children": []}
+
+        # Find correct parent (pop until we find a parent with lower level)
+        while len(stack) > 1 and stack[-1][1] >= level:
+            stack.pop()
+
+        # Add to parent's children list
+        parent_list = stack[-1][0]
+        parent_list.append(block)
+
+        # Push this block's children list onto stack
+        stack.append((block["children"], level))
+
+    # Clean up empty children lists
+    def clean_empty_children(blocks: list[dict[str, Any]]) -> None:
+        for block in blocks:
+            if block.get("children"):
+                clean_empty_children(block["children"])
+            else:
+                block.pop("children", None)
+
+    clean_empty_children(root_blocks)
+
+    return root_blocks
+
+
+def format_blocks_preview(blocks: list[dict[str, Any]], depth: int = 0) -> str:
+    """Format blocks as a tree preview for display.
+
+    Args:
+        blocks: List of block dicts with 'content' and optional 'children'.
+        depth: Current nesting depth (0 = root).
+
+    Returns:
+        Tree-formatted string showing block hierarchy.
+    """
+    lines: list[str] = []
+
+    for i, block in enumerate(blocks):
+        content = block["content"]
+        children = block.get("children", [])
+        is_last = i == len(blocks) - 1
+
+        if depth == 0:
+            # Root level - no prefix
+            lines.append(content)
+        else:
+            # Use tree characters for nested levels
+            prefix = "  " * (depth - 1)
+            connector = "└── " if is_last else "├── "
+            lines.append(prefix + connector + content)
+
+        # Process children
+        if children:
+            child_preview = format_blocks_preview(children, depth + 1)
+            lines.append(child_preview)
+
+    return "\n".join(lines)
+
+
+def count_blocks(blocks: list[dict[str, Any]]) -> int:
+    """Count total number of blocks including nested children.
+
+    Args:
+        blocks: List of block dicts with optional 'children'.
+
+    Returns:
+        Total block count.
+    """
+    count = len(blocks)
+    for block in blocks:
+        if block.get("children"):
+            count += count_blocks(block["children"])
+    return count
+
+
+def is_multiline_note(note: str) -> bool:
+    """Check if a note contains multiple non-empty lines.
+
+    Args:
+        note: The note text.
+
+    Returns:
+        True if the note has multiple non-empty lines.
+    """
+    non_empty_lines = [line for line in note.split("\n") if line.strip()]
+    return len(non_empty_lines) > 1
+
 
 # Tool implementation functions
 def get_page(
@@ -906,7 +1090,7 @@ def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
         linked_positions.add((match.start(), match.end()))
 
     matches_found: list[str] = []
-    replacements: list[tuple[int, int, str, str]] = []  # (start, end, original, page)
+    replacements: list[tuple[int, int, str]] = []  # (start, end, page)
 
     for page in sorted_pages:
         # Skip if this page is already linked in the note (case-insensitive check)
@@ -927,17 +1111,9 @@ def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
         last_is_word = bool(re.match(r"\w", last_char))
 
         # Build appropriate boundary patterns
-        if first_is_word:
-            start_boundary = r"\b"
-        else:
-            # Use lookbehind to ensure not preceded by word char
-            start_boundary = r"(?<!\w)"
-
-        if last_is_word:
-            end_boundary = r"\b"
-        else:
-            # Use lookahead to ensure not followed by word char
-            end_boundary = r"(?!\w)"
+        # Use \b for word chars, lookaround for non-word chars
+        start_boundary = r"\b" if first_is_word else r"(?<!\w)"
+        end_boundary = r"\b" if last_is_word else r"(?!\w)"
 
         pattern = rf"{start_boundary}{escaped_page}{end_boundary}"
 
@@ -953,8 +1129,7 @@ def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
 
             if not overlaps:
                 # Store the replacement (use the canonical page title)
-                original_text = match.group()
-                replacements.append((start, end, original_text, page))
+                replacements.append((start, end, page))
                 linked_positions.add((start, end))
                 if page not in matches_found:
                     matches_found.append(page)
@@ -962,20 +1137,61 @@ def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
     # Apply replacements from end to start to preserve positions
     replacements.sort(key=lambda x: x[0], reverse=True)
     enriched = note
-    for start, end, original, page in replacements:
+    for start, end, page in replacements:
         enriched = enriched[:start] + f"[[{page}]]" + enriched[end:]
 
     return {"enriched_note": enriched, "matches_found": matches_found}
 
 
+def enrich_blocks(
+    blocks: list[dict[str, Any]], page_titles: list[str]
+) -> tuple[list[dict[str, Any]], list[str]]:
+    """Enrich block contents with page links.
+
+    Args:
+        blocks: List of block dicts with 'content' and optional 'children'.
+        page_titles: List of all page titles from the graph.
+
+    Returns:
+        Tuple of (enriched_blocks, all_matches_found).
+    """
+    all_matches: list[str] = []
+    enriched: list[dict[str, Any]] = []
+
+    for block in blocks:
+        result = enrich_note_with_links(block["content"], page_titles)
+        enriched_block: dict[str, Any] = {"content": result["enriched_note"]}
+
+        for match in result["matches_found"]:
+            if match not in all_matches:
+                all_matches.append(match)
+
+        if block.get("children"):
+            enriched_children, child_matches = enrich_blocks(
+                block["children"], page_titles
+            )
+            enriched_block["children"] = enriched_children
+            for match in child_matches:
+                if match not in all_matches:
+                    all_matches.append(match)
+
+        enriched.append(enriched_block)
+
+    return enriched, all_matches
+
+
 def quick_capture_enrich(note: str) -> str:
     """Enrich a note with page links based on existing pages in the graph.
+
+    Supports both single-line and multi-line notes. Multi-line notes with
+    indentation are parsed into a block hierarchy.
 
     Args:
         note: The raw note text to enrich.
 
     Returns:
-        JSON string with enriched_note, matches_found, and daily_note_title.
+        JSON string with enriched_note, matches_found, daily_note_title,
+        and for multi-line notes: block_count and preview.
     """
     try:
         roam = get_roam_client()
@@ -984,21 +1200,50 @@ def quick_capture_enrich(note: str) -> str:
         page_titles = roam.get_all_page_titles()
         logger.info("Fetched %d page titles for enrichment", len(page_titles))
 
-        # Enrich the note
-        result = enrich_note_with_links(note, page_titles)
-
         # Get today's daily note title
         daily_note_title = roam.get_todays_daily_note_title()
 
-        return json.dumps(
-            {
-                "enriched_note": result["enriched_note"],
-                "matches_found": result["matches_found"],
-                "daily_note_title": daily_note_title,
-                "original_note": note,
-            },
-            indent=2,
-        )
+        # Check if multi-line
+        if is_multiline_note(note):
+            # Parse into blocks
+            blocks = parse_note_to_blocks(note)
+            block_count = count_blocks(blocks)
+
+            # Enrich each block
+            enriched_blocks, matches_found = enrich_blocks(blocks, page_titles)
+
+            # Generate preview
+            preview = format_blocks_preview(enriched_blocks)
+
+            # Reconstruct enriched note text (preserving original structure)
+            enriched_result = enrich_note_with_links(note, page_titles)
+
+            return json.dumps(
+                {
+                    "enriched_note": enriched_result["enriched_note"],
+                    "matches_found": matches_found,
+                    "daily_note_title": daily_note_title,
+                    "original_note": note,
+                    "block_count": block_count,
+                    "preview": preview,
+                    "is_multiline": True,
+                },
+                indent=2,
+            )
+        else:
+            # Single-line case - original behavior
+            result = enrich_note_with_links(note, page_titles)
+
+            return json.dumps(
+                {
+                    "enriched_note": result["enriched_note"],
+                    "matches_found": result["matches_found"],
+                    "daily_note_title": daily_note_title,
+                    "original_note": note,
+                    "is_multiline": False,
+                },
+                indent=2,
+            )
 
     except RoamAPIError as e:
         return json.dumps({"error": f"Error enriching note: {str(e)}"})
@@ -1007,21 +1252,40 @@ def quick_capture_enrich(note: str) -> str:
 def quick_capture_commit(note: str) -> str:
     """Append a note to today's daily note page.
 
+    Supports both single-line and multi-line notes. Multi-line notes with
+    indentation are parsed into nested blocks.
+
     Args:
         note: The note text to append (can be enriched or plain).
 
     Returns:
-        Confirmation message with daily note title and block UID.
+        Confirmation message with daily note title, block count, and root UID.
     """
     try:
         roam = get_roam_client()
 
-        result = roam.append_block_to_daily_note(note)
+        # Check if multi-line
+        if is_multiline_note(note):
+            # Parse into blocks
+            blocks = parse_note_to_blocks(note)
 
-        return (
-            f"Added to {result['daily_note_title']}\n"
-            f"Block UID: {result['block_uid']}"
-        )
+            # Use batch write for multi-block creation
+            result = roam.append_blocks_to_daily_note(blocks)
+
+            block_count = result["block_count"]
+            daily_title = result["daily_note_title"]
+            return (
+                f"Added {block_count} blocks to {daily_title}\n"
+                f"Root block UID: {result['root_uid']}"
+            )
+        else:
+            # Single-line case - original behavior
+            result = roam.append_block_to_daily_note(note)
+
+            return (
+                f"Added to {result['daily_note_title']}\n"
+                f"Block UID: {result['block_uid']}"
+            )
 
     except PageNotFoundError as e:
         return f"Error: {str(e)}"
