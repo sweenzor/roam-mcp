@@ -251,6 +251,9 @@ class RoamAPI:
         self.graph_name: str = resolved_graph
         self._redirect_cache: dict[str, str] = {}
         self._daily_note_format: str | None = None
+        # Cache for page titles (refreshed every 5 minutes)
+        self._page_titles_cache: list[str] | None = None
+        self._page_titles_cache_time: float = 0.0
         logger.info("Initialized RoamAPI client for graph: %s", self.graph_name)
 
     def _mask_token(self, token: str) -> str:
@@ -628,8 +631,11 @@ class RoamAPI:
         pattern = "[* {:block/children ...}]"
         return self.pull(eid, pattern)
 
-    def get_all_page_titles(self) -> list[str]:
-        """Get all page titles in the graph.
+    def get_all_page_titles(self, force_refresh: bool = False) -> list[str]:
+        """Get all page titles in the graph (cached for 5 minutes).
+
+        Args:
+            force_refresh: If True, bypass cache and fetch fresh data.
 
         Returns:
             List of all page titles.
@@ -637,9 +643,30 @@ class RoamAPI:
         Raises:
             RoamAPIError: If the API request fails.
         """
+        cache_ttl = 300  # 5 minutes
+        now = time.time()
+
+        # Return cached data if still fresh
+        if (
+            not force_refresh
+            and self._page_titles_cache is not None
+            and (now - self._page_titles_cache_time) < cache_ttl
+        ):
+            logger.debug("Using cached page titles (%d pages)", len(self._page_titles_cache))
+            return self._page_titles_cache
+
+        # Fetch fresh data
+        logger.info("Fetching all page titles from graph")
         query = "[:find ?title :where [?e :node/title ?title]]"
         results = self.run_query(query)
-        return [r[0] for r in results if r[0]]
+        titles = [r[0] for r in results if r[0]]
+
+        # Update cache
+        self._page_titles_cache = titles
+        self._page_titles_cache_time = now
+        logger.info("Cached %d page titles", len(titles))
+
+        return titles
 
     def get_todays_daily_note_title(self) -> str:
         """Get today's daily note page title in the correct format.

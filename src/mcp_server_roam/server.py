@@ -864,6 +864,9 @@ def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
     Longer page names are matched first to avoid partial matches.
     Only matches whole words/phrases (not substrings within words).
 
+    Performance: Uses word-based pre-filtering to avoid regex matching against
+    pages that can't possibly match, reducing O(pages) to O(candidate_pages).
+
     Args:
         note: The raw note text to enrich.
         page_titles: List of all page titles from the graph.
@@ -873,7 +876,21 @@ def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
     """
     # Filter pages by minimum length and sort by length descending
     filtered_pages = [p for p in page_titles if len(p) >= MIN_PAGE_NAME_LENGTH]
-    sorted_pages = sorted(filtered_pages, key=len, reverse=True)
+
+    # Pre-filter optimization: extract words from note for fast candidate filtering
+    # A page can only match if all its words appear in the note
+    note_lower = note.lower()
+    note_words = set(re.findall(r"\w+", note_lower))
+
+    # Filter to only pages where all words appear in the note
+    candidate_pages = []
+    for page in filtered_pages:
+        page_words = re.findall(r"\w+", page.lower())
+        if page_words and all(word in note_words for word in page_words):
+            candidate_pages.append(page)
+
+    # Sort candidates by length descending (longer matches first)
+    sorted_pages = sorted(candidate_pages, key=len, reverse=True)
 
     # Track which positions are already linked (to avoid double-linking)
     linked_positions: set[tuple[int, int]] = set()
