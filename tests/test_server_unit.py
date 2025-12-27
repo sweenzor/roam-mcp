@@ -2734,6 +2734,23 @@ class TestEnrichBlocks:
 
         assert matches.count("John") == 1
 
+    def test_deduplicates_matches_across_parent_and_children(self) -> None:
+        """Test that matches from children don't duplicate parent matches."""
+        blocks = [
+            {
+                "content": "Meeting with John",
+                "children": [{"content": "John agreed to the plan"}],
+            }
+        ]
+        page_titles = ["John"]
+
+        enriched, matches = enrich_blocks(blocks, page_titles)
+
+        # John should only appear once in matches even though it's in both levels
+        assert matches.count("John") == 1
+        assert "[[John]]" in enriched[0]["content"]
+        assert "[[John]]" in enriched[0]["children"][0]["content"]
+
 
 class TestQuickCaptureEnrichMultiline:
     """Tests for quick_capture_enrich with multi-line notes."""
