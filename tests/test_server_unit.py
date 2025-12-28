@@ -2324,6 +2324,76 @@ class TestEnrichNoteWithLinks:
         assert "[[machine learning]]" in result["enriched_note"]
 
 
+class TestCapitalizeFirstLetter:
+    """Tests for the capitalize_first_letter function."""
+
+    def test_capitalizes_simple_text(self) -> None:
+        """Test basic capitalization of lowercase text."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        assert capitalize_first_letter("hello world") == "Hello world"
+        assert capitalize_first_letter("want to discuss") == "Want to discuss"
+
+    def test_preserves_already_capitalized(self) -> None:
+        """Test that already capitalized text is unchanged."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        assert capitalize_first_letter("Hello world") == "Hello world"
+        assert capitalize_first_letter("THE QUICK FOX") == "THE QUICK FOX"
+
+    def test_capitalizes_after_link(self) -> None:
+        """Test capitalization of text after a leading link."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        # The 'w' in 'with' should be capitalized since it's the first alpha
+        assert capitalize_first_letter("[[Call]] with john") == "[[Call]] With john"
+        assert (
+            capitalize_first_letter("[[Project]] is going well")
+            == "[[Project]] Is going well"
+        )
+
+    def test_handles_empty_string(self) -> None:
+        """Test that empty string returns empty string."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        assert capitalize_first_letter("") == ""
+
+    def test_handles_whitespace_prefix(self) -> None:
+        """Test that leading whitespace is preserved."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        assert capitalize_first_letter("  hello") == "  Hello"
+        assert capitalize_first_letter("\thello") == "\tHello"
+
+    def test_handles_non_alphabetic_start(self) -> None:
+        """Test text starting with numbers or punctuation."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        assert capitalize_first_letter("123 test") == "123 test"
+        assert capitalize_first_letter("- bullet point") == "- bullet point"
+
+    def test_handles_multiple_links(self) -> None:
+        """Test text with multiple consecutive links."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        result = capitalize_first_letter("[[A]] [[B]] then text")
+        assert result == "[[A]] [[B]] Then text"
+
+    def test_handles_only_whitespace(self) -> None:
+        """Test text that is only whitespace."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        assert capitalize_first_letter("   ") == "   "
+        assert capitalize_first_letter("\t\n") == "\t\n"
+
+    def test_handles_unclosed_link(self) -> None:
+        """Test text with unclosed [[ bracket."""
+        from mcp_server_roam.server import capitalize_first_letter
+
+        # Unclosed link - '[' is non-alphabetic, so no capitalization happens
+        assert capitalize_first_letter("[[broken link") == "[[broken link"
+
+
 class TestQuickCaptureEnrich:
     """Tests for the quick_capture_enrich function."""
 

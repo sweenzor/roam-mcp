@@ -1041,6 +1041,42 @@ def get_backlinks(page_title: str, limit: int = 20) -> str:
         return f"Error fetching backlinks: {str(e)}"
 
 
+def capitalize_first_letter(text: str) -> str:
+    """Capitalize the first letter of text, handling [[links]] at the start.
+
+    If the text starts with [[link]], capitalizes the first letter after the link.
+    Otherwise capitalizes the first letter of the text.
+
+    Args:
+        text: The text to capitalize.
+
+    Returns:
+        Text with first letter capitalized.
+    """
+    if not text:
+        return text
+
+    # Find the first alphabetic character (skipping [[links]] and whitespace)
+    i = 0
+    while i < len(text):
+        # Skip [[...]] links
+        if text[i : i + 2] == "[[":
+            close_idx = text.find("]]", i)
+            if close_idx != -1:
+                i = close_idx + 2
+                continue
+        # Skip whitespace
+        if text[i].isspace():
+            i += 1
+            continue
+        # Found a non-link, non-whitespace character
+        if text[i].isalpha():
+            return text[:i] + text[i].upper() + text[i + 1 :]
+        # Non-alphabetic character (punctuation, etc.) - stop looking
+        break
+    return text
+
+
 def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
     """Enrich a note by adding [[page links]] for matching page names.
 
@@ -1146,7 +1182,7 @@ def enrich_note_with_links(note: str, page_titles: list[str]) -> dict[str, Any]:
 def enrich_blocks(
     blocks: list[dict[str, Any]], page_titles: list[str]
 ) -> tuple[list[dict[str, Any]], list[str]]:
-    """Enrich block contents with page links.
+    """Enrich block contents with page links and capitalization.
 
     Args:
         blocks: List of block dicts with 'content' and optional 'children'.
@@ -1160,7 +1196,9 @@ def enrich_blocks(
 
     for block in blocks:
         result = enrich_note_with_links(block["content"], page_titles)
-        enriched_block: dict[str, Any] = {"content": result["enriched_note"]}
+        # Apply capitalization after link enrichment
+        capitalized_content = capitalize_first_letter(result["enriched_note"])
+        enriched_block: dict[str, Any] = {"content": capitalized_content}
 
         for match in result["matches_found"]:
             if match not in all_matches:
@@ -1217,10 +1255,16 @@ def quick_capture_enrich(note: str) -> str:
 
             # Reconstruct enriched note text (preserving original structure)
             enriched_result = enrich_note_with_links(note, page_titles)
+            # Apply capitalization to each line
+            enriched_lines = enriched_result["enriched_note"].split("\n")
+            capitalized_lines = [
+                capitalize_first_letter(line) for line in enriched_lines
+            ]
+            enriched_note = "\n".join(capitalized_lines)
 
             return json.dumps(
                 {
-                    "enriched_note": enriched_result["enriched_note"],
+                    "enriched_note": enriched_note,
                     "matches_found": matches_found,
                     "daily_note_title": daily_note_title,
                     "original_note": note,
@@ -1233,10 +1277,12 @@ def quick_capture_enrich(note: str) -> str:
         else:
             # Single-line case - original behavior
             result = enrich_note_with_links(note, page_titles)
+            # Apply capitalization
+            enriched_note = capitalize_first_letter(result["enriched_note"])
 
             return json.dumps(
                 {
-                    "enriched_note": result["enriched_note"],
+                    "enriched_note": enriched_note,
                     "matches_found": result["matches_found"],
                     "daily_note_title": daily_note_title,
                     "original_note": note,
