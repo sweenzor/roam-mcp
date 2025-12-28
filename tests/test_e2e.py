@@ -65,6 +65,8 @@ class TestE2E:
                 "search_by_text",
                 "raw_query",
                 "get_backlinks",
+                "quick_capture_enrich",
+                "quick_capture_commit",
             }
             assert expected == tool_names
 

@@ -169,6 +169,21 @@ Currently implemented tools:
     - Input: page_title, limit (default: 20)
     - Output: List of blocks with UID, content, and source page title
 
+11. `quick_capture_enrich`: Enrich a quick note with page links
+    - Input: note (raw text)
+    - Output: JSON with enriched_note, matches_found, daily_note_title
+    - Finds existing page names in the note and adds [[page links]]
+    - Case-insensitive matching, preserves canonical page title case
+    - Longer page names matched first to avoid partial matches
+    - Skips pages already linked or tagged in the note
+    - Minimum page name length: 3 characters
+
+12. `quick_capture_commit`: Append a note to today's daily note
+    - Input: note (the enriched or raw note text)
+    - Output: Confirmation with daily note title and block UID
+    - Appends to end of today's daily note page
+    - Auto-detects daily note date format
+
 Future tools to consider:
 - `create_page`: Create new pages with optional content
 - `import_markdown`: Import nested markdown content
@@ -208,6 +223,83 @@ The `daily_context` tool is a powerful feature for understanding your recent wor
 - Meeting notes referencing [[June 13th, 2025]]
 - Todo scheduled for [[June 13th, 2025]]
 ```
+
+## Quick Capture
+
+The `quick_capture_enrich` and `quick_capture_commit` tools provide an interactive two-step workflow for capturing notes with automatic page linking. Supports both single-line and multi-line notes with nested block structures.
+
+### Workflow
+
+1. **Enrich**: Call `quick_capture_enrich` with your raw note text
+2. **Review**: Claude shows you the enriched note with page links added
+3. **Approve/Edit**: You can approve or request changes
+4. **Commit**: Call `quick_capture_commit` to append to your daily note
+
+### Single-Line Example
+
+```
+User: "Had a meeting with John about the AI project roadmap"
+
+Claude calls quick_capture_enrich, which returns:
+{
+  "enriched_note": "Had a meeting with [[John]] about the [[AI project]] roadmap",
+  "matches_found": ["John", "AI project"],
+  "daily_note_title": "December 25th, 2025",
+  "is_multiline": false
+}
+
+Claude: "Here's your enriched note with 2 page links added:
+  'Had a meeting with [[John]] about the [[AI project]] roadmap'
+
+  Add to December 25th, 2025?"
+
+User: "Yes!"
+
+Claude calls quick_capture_commit, returns:
+  "Added to December 25th, 2025 (Block UID: abc123)"
+```
+
+### Multi-Line Example
+
+```
+User: "Call with John
+- Discussed AI project
+  - Timeline looks good
+- Next steps
+  - Send docs"
+
+Claude calls quick_capture_enrich, which returns:
+{
+  "enriched_note": "Call with [[John]]\n- Discussed [[AI project]]\n  - Timeline looks good\n- Next steps\n  - Send docs",
+  "matches_found": ["John", "AI project"],
+  "daily_note_title": "December 25th, 2025",
+  "block_count": 5,
+  "preview": "Call with [[John]]\n├── Discussed [[AI project]]\n│   └── Timeline looks good\n└── Next steps\n    └── Send docs",
+  "is_multiline": true
+}
+
+Claude calls quick_capture_commit, returns:
+  "Added 5 blocks to December 25th, 2025
+   Root block UID: abc123"
+```
+
+### Multi-Line Features
+
+- **Flexible indentation**: Supports 2-space, 4-space, or tab indentation
+- **Auto-detect indent style**: Uses GCD of all indents to determine unit
+- **Optional bullets**: Works with `- `, `* `, `• ` or no bullets at all
+- **Nested blocks**: Creates proper parent/child block hierarchy in Roam
+- **Single API call**: Uses batch-actions for atomic multi-block creation
+- **Preview output**: Shows tree structure of parsed blocks before commit
+
+### Matching Rules
+
+- **Minimum length**: Pages must be 3+ characters to be matched
+- **Case-insensitive**: Matches "john" to page "John"
+- **Longer first**: "AI project" matches before "AI" alone
+- **No duplicates**: If `[[John]]` already exists, "John" elsewhere won't be linked
+- **Respects tags**: `#project` won't be double-linked as `[[project]]`
+- **Word boundaries**: "projects" won't match page "project"
 
 ## Semantic Search Infrastructure
 

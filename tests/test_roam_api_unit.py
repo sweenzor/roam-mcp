@@ -1590,3 +1590,284 @@ class TestGetBlockSiblings:
             siblings = api.get_block_siblings("block-uid", count=1)
             # Loop finishes without finding the block - returns empty
             assert siblings == {"before": [], "after": []}
+
+
+class TestGetTodaysDailyNoteTitle:
+    """Tests for get_todays_daily_note_title method."""
+
+    def test_returns_ordinal_format(self) -> None:
+        """Test returning ordinal format (e.g., December 27th, 2025)."""
+        from mcp_server_roam.roam_api import DATE_FORMAT_ORDINAL
+
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(
+            api, "find_daily_note_format", return_value=DATE_FORMAT_ORDINAL
+        ):
+            title = api.get_todays_daily_note_title()
+
+            # Should contain month name, day with ordinal, and year
+            assert "202" in title  # Year
+            # Check it has ordinal suffix
+            assert any(suffix in title for suffix in ["st,", "nd,", "rd,", "th,"])
+
+    def test_returns_strftime_format(self) -> None:
+        """Test returning strftime format (e.g., %Y-%m-%d)."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(api, "find_daily_note_format", return_value="%Y-%m-%d"):
+            title = api.get_todays_daily_note_title()
+
+            # Should be in YYYY-MM-DD format
+            assert len(title) == 10
+            assert title[4] == "-"
+            assert title[7] == "-"
+
+
+class TestAppendBlockToDailyNote:
+    """Tests for append_block_to_daily_note method."""
+
+    def test_appends_block_successfully(self) -> None:
+        """Test appending a block to daily note."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"uid": "new-block-uid"}
+
+        with (
+            patch.object(
+                api, "get_todays_daily_note_title", return_value="December 27th, 2025"
+            ),
+            patch.object(api, "run_query", return_value=[["daily-page-uid"]]),
+            patch.object(api, "call", return_value=mock_response),
+        ):
+            result = api.append_block_to_daily_note("Test content")
+
+            assert result["block_uid"] == "new-block-uid"
+            assert result["daily_note_title"] == "December 27th, 2025"
+
+    def test_raises_page_not_found(self) -> None:
+        """Test error when daily note page not found."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with (
+            patch.object(
+                api, "get_todays_daily_note_title", return_value="December 27th, 2025"
+            ),
+            patch.object(api, "run_query", return_value=[]),
+            pytest.raises(PageNotFoundError),
+        ):
+            api.append_block_to_daily_note("Test content")
+
+
+class TestGetAllPageTitles:
+    """Tests for get_all_page_titles method."""
+
+    def test_fetches_all_page_titles(self) -> None:
+        """Test fetching all page titles from the graph."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(
+            api, "run_query", return_value=[["Page 1"], ["Page 2"], ["Page 3"]]
+        ):
+            titles = api.get_all_page_titles()
+
+            assert titles == ["Page 1", "Page 2", "Page 3"]
+
+    def test_filters_empty_titles(self) -> None:
+        """Test that empty/None titles are filtered out."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(
+            api, "run_query", return_value=[["Page 1"], [None], [""], ["Page 2"]]
+        ):
+            titles = api.get_all_page_titles()
+
+            assert titles == ["Page 1", "Page 2"]
+
+    def test_returns_cached_titles(self) -> None:
+        """Test that cached titles are returned within TTL."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(
+            api, "run_query", return_value=[["Page 1"], ["Page 2"]]
+        ) as mock_query:
+            # First call - should fetch
+            titles1 = api.get_all_page_titles()
+            # Second call - should use cache
+            titles2 = api.get_all_page_titles()
+
+            assert titles1 == titles2
+            assert mock_query.call_count == 1  # Only called once
+
+    def test_force_refresh_bypasses_cache(self) -> None:
+        """Test that force_refresh=True fetches fresh data."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        with patch.object(
+            api, "run_query", return_value=[["Page 1"], ["Page 2"]]
+        ) as mock_query:
+            # First call
+            api.get_all_page_titles()
+            # Force refresh
+            api.get_all_page_titles(force_refresh=True)
+
+            assert mock_query.call_count == 2
+
+
+class TestBatchWrite:
+    """Tests for batch_write method."""
+
+    def test_executes_batch_actions(self) -> None:
+        """Test executing batch write actions."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        actions = [
+            {
+                "action": "create-block",
+                "location": {"parent-uid": "page-uid", "order": 0},
+                "block": {"uid": -1, "string": "Block 1"},
+            },
+            {
+                "action": "create-block",
+                "location": {"parent-uid": -1, "order": 0},
+                "block": {"uid": -2, "string": "Child block"},
+            },
+        ]
+
+        mock_response = MagicMock()
+        mock_response.json.return_value = {"uid": "created-uid"}
+
+        with patch.object(api, "call", return_value=mock_response) as mock_call:
+            result = api.batch_write(actions)
+
+            mock_call.assert_called_once()
+            call_args = mock_call.call_args
+            assert call_args[0][0] == "/api/graph/test-graph/write"
+            assert call_args[0][1]["action"] == "batch-actions"
+            assert call_args[0][1]["actions"] == actions
+            assert result == {"uid": "created-uid"}
+
+
+class TestAppendBlocksToDailyNote:
+    """Tests for append_blocks_to_daily_note method."""
+
+    def test_appends_single_block(self) -> None:
+        """Test appending a single block to daily note."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        blocks = [{"content": "Single block"}]
+
+        with (
+            patch.object(
+                api, "get_todays_daily_note_title", return_value="December 27th, 2025"
+            ),
+            patch.object(api, "run_query", return_value=[["daily-page-uid"]]),
+            patch.object(
+                api, "batch_write", return_value={"uid": "created-uid"}
+            ) as mock_batch,
+        ):
+            result = api.append_blocks_to_daily_note(blocks)
+
+            assert result["block_count"] == 1
+            assert result["daily_note_title"] == "December 27th, 2025"
+            mock_batch.assert_called_once()
+
+    def test_appends_nested_blocks(self) -> None:
+        """Test appending nested blocks to daily note."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        blocks = [
+            {
+                "content": "Parent",
+                "children": [
+                    {"content": "Child 1"},
+                    {"content": "Child 2"},
+                ],
+            }
+        ]
+
+        with (
+            patch.object(
+                api, "get_todays_daily_note_title", return_value="December 27th, 2025"
+            ),
+            patch.object(api, "run_query", return_value=[["daily-page-uid"]]),
+            patch.object(
+                api, "batch_write", return_value={"uid": "created-uid"}
+            ) as mock_batch,
+        ):
+            result = api.append_blocks_to_daily_note(blocks)
+
+            assert result["block_count"] == 3  # 1 parent + 2 children
+            # Check that batch_write was called with correct structure
+            actions = mock_batch.call_args[0][0]
+            assert len(actions) == 3
+
+    def test_appends_deeply_nested_blocks(self) -> None:
+        """Test appending deeply nested blocks."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        blocks = [
+            {
+                "content": "Level 1",
+                "children": [
+                    {
+                        "content": "Level 2",
+                        "children": [{"content": "Level 3"}],
+                    }
+                ],
+            }
+        ]
+
+        with (
+            patch.object(
+                api, "get_todays_daily_note_title", return_value="December 27th, 2025"
+            ),
+            patch.object(api, "run_query", return_value=[["daily-page-uid"]]),
+            patch.object(api, "batch_write", return_value={"uid": "created-uid"}),
+        ):
+            result = api.append_blocks_to_daily_note(blocks)
+
+            assert result["block_count"] == 3
+
+    def test_appends_multiple_root_blocks(self) -> None:
+        """Test appending multiple root-level blocks."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        blocks = [
+            {"content": "First"},
+            {"content": "Second"},
+            {"content": "Third"},
+        ]
+
+        with (
+            patch.object(
+                api, "get_todays_daily_note_title", return_value="December 27th, 2025"
+            ),
+            patch.object(api, "run_query", return_value=[["daily-page-uid"]]),
+            patch.object(
+                api, "batch_write", return_value={"uid": "created-uid"}
+            ) as mock_batch,
+        ):
+            result = api.append_blocks_to_daily_note(blocks)
+
+            assert result["block_count"] == 3
+            actions = mock_batch.call_args[0][0]
+            # All root blocks should have "last" order
+            for action in actions:
+                assert action["location"]["order"] == "last"
+
+    def test_raises_page_not_found(self) -> None:
+        """Test error when daily note page not found."""
+        api = RoamAPI(api_token="test-token", graph_name="test-graph")
+
+        blocks = [{"content": "Block"}]
+
+        with (
+            patch.object(
+                api, "get_todays_daily_note_title", return_value="December 27th, 2025"
+            ),
+            patch.object(api, "run_query", return_value=[]),
+            pytest.raises(PageNotFoundError),
+        ):
+            api.append_blocks_to_daily_note(blocks)
